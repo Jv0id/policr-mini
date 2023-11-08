@@ -6,6 +6,15 @@ defmodule PolicrMiniBot.Captcha do
   alias PolicrMini.Chats.Scheme
   alias Telegex.Model.{InlineKeyboardButton, InlineKeyboardMarkup}
 
+  alias PolicrMiniBot.{
+    ImageCaptcha,
+    CustomCaptcha,
+    ArithmeticCaptcha,
+    FallbackCaptcha
+  }
+
+  require Logger
+
   defmodule Data do
     @moduledoc """
     验证数据
@@ -42,7 +51,7 @@ defmodule PolicrMiniBot.Captcha do
   制造验证数据，提供 `candidates`。
   此函数需要自行实现。
   """
-  @callback make!(chat_id :: integer, scheme :: Scheme) :: Data.t()
+  @callback make!(chat_id :: integer, scheme :: Scheme.t()) :: Data.t()
 
   @spec build_markup([[Data.candidate()]], integer()) :: InlineKeyboardMarkup.t()
   @doc """
@@ -72,7 +81,7 @@ defmodule PolicrMiniBot.Captcha do
 
         %InlineKeyboardButton{
           text: to_string(text),
-          callback_data: "verification:#{@data_vsn}:#{index}:#{verification_id}"
+          callback_data: "ans:#{@data_vsn}:#{index}:#{verification_id}"
         }
       end)
     end
@@ -83,5 +92,27 @@ defmodule PolicrMiniBot.Captcha do
       |> Enum.map(make_line)
 
     %InlineKeyboardMarkup{inline_keyboard: inline_keyboard}
+  end
+
+  @captcha_mapping [
+    image: ImageCaptcha,
+    custom: CustomCaptcha,
+    arithmetic: ArithmeticCaptcha,
+    # 当前的备用验证就是主动验证
+    initiative: FallbackCaptcha
+  ]
+
+  def make(captcha_name, chat_id, scheme) do
+    module = @captcha_mapping[captcha_name]
+
+    module.make!(chat_id, scheme)
+  rescue
+    e ->
+      Logger.warning(
+        "Make captcha data failed: #{inspect(exception: e)}",
+        chat_id: chat_id
+      )
+
+      FallbackCaptcha.make!(chat_id, scheme)
   end
 end

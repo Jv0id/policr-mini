@@ -21,14 +21,23 @@ defmodule PolicrMiniBot.Consumer do
   def receive(%Telegex.Model.Update{} = update) do
     DynamicSupervisor.start_child(
       __MODULE__,
-      {Task,
-       fn ->
-         try do
-           Telegex.Plug.Pipeline.call(update, %State{})
-         rescue
-           e -> Logger.error("Uncaught Error: #{inspect(e)}")
-         end
-       end}
+      {Task, fn -> task(update) end}
     )
+  end
+
+  defp task(update) do
+    try do
+      Telegex.Plug.Pipeline.call(update, %State{})
+    rescue
+      e ->
+        import PolicrMiniBot.Helper.FromParser
+
+        chat_id = parse_chat_id(update)
+
+        Logger.error(
+          "Uncaught Error: #{inspect(exception: e)}\n#{Exception.format(:error, e, __STACKTRACE__)}",
+          chat_id: chat_id
+        )
+    end
   end
 end

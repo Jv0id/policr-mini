@@ -28,7 +28,13 @@ defmodule PolicrMiniBot.RespSyncCmdPlug do
 
     cond do
       waiting_sec > 0 ->
-        send_message(chat_id, "同步过于频繁，请在 #{waiting_sec} 秒后重试。")
+        send_text(
+          chat_id,
+          commands_text("同步过于频繁，请在 %{count} 秒后重试。",
+            count: waiting_sec
+          ),
+          logging: true
+        )
 
       no_permissions?(message) ->
         # 添加 10 秒的速度限制记录。
@@ -46,7 +52,7 @@ defmodule PolicrMiniBot.RespSyncCmdPlug do
         # 注意，同步完成后需进一步确保方案存在。
         with {:ok, chat} <- synchronize_chat(chat_id),
              {:ok, chat} <- Syncing.sync_for_chat_permissions(chat),
-             {:ok, _scheme} <- Chats.fetch_scheme(chat_id),
+             {:ok, _scheme} <- Chats.find_or_init_scheme(chat_id),
              {:ok, member} <- Telegex.get_chat_member(chat_id, PolicrMiniBot.id()) do
           # 检查是否具备接管权限，如果具备则自动接管验证
           has_takeover_permissions = check_takeover_permissions(member) == :ok
@@ -62,29 +68,45 @@ defmodule PolicrMiniBot.RespSyncCmdPlug do
               false
             end
 
-          message_text = t("sync.success") <> "\n\n"
+          ttitle = commands_text("同步成功")
+          tupdate_chat = "✔️ " <> commands_text("已更新群组资料。")
+          tupdate_admins = "✔️ " <> commands_text("已更新管理员权限。")
 
-          message_text =
+          ttakeover =
             if has_takeover_permissions do
-              takeover_text =
-                if is_taken_over, do: t("sync.already_taken_over"), else: t("sync.taken_over")
+              text =
+                if is_taken_over do
+                  commands_text("新成员验证已处于接管状态。")
+                else
+                  commands_text("因为本机器人具备权限，已接管新成员验证。")
+                end
 
-              message_text <> t("sync.has_permissions") <> takeover_text
+              "✔️ " <> text
             else
-              takeover_text =
-                if is_taken_over,
-                  do: t("sync.cancelled_takeover"),
-                  else: t("sync.unable_to_takeover")
+              text =
+                if is_taken_over do
+                  commands_text("由于本机器人缺失必要管理权限，已取消对新成员验证的接管。")
+                else
+                  commands_text("因为本机器人缺失必要管理权限，所以无法接管新成员验证。")
+                end
 
-              message_text <> t("sync.no_permission") <> takeover_text
+              "⚠️ " <> text
             end
 
-          async_run(fn -> send_message(chat_id, message_text) end)
+          text = """
+          *#{ttitle}*
+
+          #{tupdate_chat}
+          #{tupdate_admins}
+          #{ttakeover}
+          """
+
+          async_run(fn -> send_text(chat_id, text, parse_mode: "MarkdownV2", logging: true) end)
         else
           {:error, reason} ->
             Logger.error("Sync of permissions failed: #{inspect(reason: reason)}")
 
-            send_message(chat_id, t("errors.sync_failed"))
+            send_text(chat_id, commands_text("出现了一些问题，同步失败。请联系开发者。"), logging: true)
         end
     end
 

@@ -1,8 +1,8 @@
-defmodule PolicrMini.Schema.VerificationTest do
+defmodule PolicrMini.Chats.VerificationTest do
   use ExUnit.Case
 
   alias PolicrMini.Factory
-  alias PolicrMini.Schema.Verification
+  alias PolicrMini.Chats.Verification
 
   describe "schema" do
     test "schema metadata" do
@@ -12,7 +12,6 @@ defmodule PolicrMini.Schema.VerificationTest do
                [
                  :id,
                  :chat_id,
-                 :message_snapshot_id,
                  :target_user_id,
                  :target_user_name,
                  :target_user_language_code,
@@ -21,6 +20,7 @@ defmodule PolicrMini.Schema.VerificationTest do
                  :seconds,
                  :status,
                  :chosen,
+                 :source,
                  :inserted_at,
                  :updated_at
                ]
@@ -30,7 +30,7 @@ defmodule PolicrMini.Schema.VerificationTest do
   end
 
   test "changeset/2" do
-    verification = Factory.build(:verification, chat_id: 123_456_789_011, message_snapshot_id: 1)
+    verification = Factory.build(:verification, chat_id: 123_456_789_011)
 
     updated_message_id = 19_121
     updated_indices = [2, 3]
@@ -64,7 +64,8 @@ defmodule PolicrMini.Schema.VerificationTest do
              :chat_id,
              :target_user_id,
              :seconds,
-             :status
+             :status,
+             :source
            ]
 
     assert changeset.valid?

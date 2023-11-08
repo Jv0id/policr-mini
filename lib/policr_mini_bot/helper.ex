@@ -13,7 +13,7 @@ defmodule PolicrMiniBot.Helper do
 
   require Logger
 
-  @type tgerror :: {:error, Telegex.Model.errors()}
+  @type tgerr :: {:error, Telegex.Model.errors()}
   @type tgmsg :: Telegex.Model.Message.t()
 
   @doc """
@@ -56,258 +56,6 @@ defmodule PolicrMiniBot.Helper do
     )
   end
 
-  @spec escape_marked(binary) :: binary
-  def escape_marked(text) do
-    text
-    |> String.replace(".", "\\.")
-    |> String.replace("+", "\\+")
-    |> String.replace("-", "\\-")
-    |> String.replace("=", "\\=")
-  end
-
-  # 过滤掉关键字列表中的 nil 值
-  defp delete_keyword_nils(keyword) when is_list(keyword) do
-    keyword |> Enum.filter(fn {_, value} -> value != nil end)
-  end
-
-  @time_seeds [0.2, 0.4, 0.8, 1.0]
-  @markdown_parse_mode "MarkdownV2"
-  @markdown_to_html_parse_mode "MarkdownV2ToHTML"
-
-  @type parsemode :: String.t()
-
-  @type message_text :: String.t()
-  @type send_message_opts :: [
-          {:disable_notification, boolean},
-          {:parse_mode, parsemode | nil},
-          {:disable_web_page_preview, boolean},
-          {:reply_markup, Telegex.Model.InlineKeyboardMarkup.t()},
-          {:retry, integer},
-          {:unescaped, boolean}
-        ]
-
-  @spec preprocess_send_message_args(message_text, send_message_opts) ::
-          {message_text, send_message_opts}
-  defp preprocess_send_message_args(text, options) do
-    options =
-      options
-      |> Keyword.put_new(:disable_notification, true)
-      |> Keyword.put_new(:parse_mode, @markdown_parse_mode)
-      |> Keyword.put_new(:disable_web_page_preview, true)
-      |> Keyword.put_new(:retry, 5)
-      |> Keyword.put_new(:unescaped, false)
-      |> delete_keyword_nils()
-
-    parse_mode = Keyword.get(options, :parse_mode)
-    unescaped = Keyword.get(options, :unescaped)
-
-    case parse_mode do
-      @markdown_parse_mode ->
-        text = if unescaped, do: text, else: escape_marked(text)
-
-        {text, options}
-
-      @markdown_to_html_parse_mode ->
-        text = Telegex.Marked.as_html(text)
-
-        {text, Keyword.put(options, :parse_mode, "HTML")}
-
-      _ ->
-        {text, options}
-    end
-  end
-
-  @doc """
-  发送文本消息。
-
-  参数 `options` 参考 `Telegex.send_message/3` 的 `optinal` 说明。除此之外，还有一些附加参数支持以及默认值。
-  ## 附加可选参数和默认值
-  - `disable_notification`: 默认值为 `true`。
-  - `parse_mode`: 默认值为 `MarkdownV2`。
-  - `disable_web_page_preview`: 默认值为 `false`。
-  - `retry`: 附加参数，表示发送失败时自动重试的最大次数，默认值为 `5`。
-  """
-  @spec send_message(integer, String.t(), send_message_opts) :: {:ok, tgmsg} | tgerror()
-  def send_message(chat_id, text, options \\ []) do
-    {text, options} = preprocess_send_message_args(text, options)
-
-    case Telegex.send_message(chat_id, text, options) do
-      {:ok, message} ->
-        {:ok, message}
-
-      {:error, %Telegex.Model.RequestError{reason: :timeout}} = e ->
-        # 处理重试（减少次数并递归）
-        retry = options |> Keyword.get(:retry)
-
-        if retry && retry > 0 do
-          Logger.warning(
-            "Message sending timeout, waiting for retry: #{inspect(remaining_times: retry - 1, chat_id: chat_id)}"
-          )
-
-          options = options |> Keyword.put(:retry, retry - 1)
-          send_message(chat_id, text, options)
-        else
-          e
-        end
-
-      {:error, %Telegex.Model.Error{description: <<"Too Many Requests: retry after">> <> _rest}} =
-          e ->
-        retry = options |> Keyword.get(:retry)
-
-        if retry && retry > 0 do
-          Logger.warning(
-            "Too many requests have been limited from sending messages: #{inspect(remaining_times: retry - 1, chat_id: chat_id)}"
-          )
-
-          options = options |> Keyword.put(:retry, retry - 1)
-          :timer.sleep(trunc(800 * retry * Enum.random(@time_seeds)))
-          send_message(chat_id, text, options)
-        else
-          e
-        end
-
-      {:error, %{error_code: 403}} = e ->
-        Logger.warning(
-          "Message sending failed due to user blocking: #{inspect(chat_id: chat_id)}"
-        )
-
-        e
-
-      {:error, reason} = e ->
-        Logger.error("Message sending failed: #{inspect(text: text, reason: reason)}")
-
-        e
-    end
-  end
-
-  @type send_photo_opts :: [
-          {:caption, String.t()},
-          {:disable_notification, boolean},
-          {:parse_mode, parsemode | nil},
-          {:reply_markup, Telegex.Model.InlineKeyboardMarkup.t()},
-          {:retry, integer}
-        ]
-
-  @spec preprocess_send_photo_options(send_photo_opts) :: send_photo_opts
-  defp preprocess_send_photo_options(options) do
-    options =
-      options
-      |> Keyword.put_new(:disable_notification, true)
-      |> Keyword.put_new(:parse_mode, @markdown_parse_mode)
-      |> Keyword.put_new(:retry, 5)
-      |> delete_keyword_nils()
-
-    parse_mode = Keyword.get(options, :parse_mode)
-
-    if caption = options[:caption] do
-      case parse_mode do
-        @markdown_parse_mode ->
-          caption = escape_marked(caption)
-          Keyword.put(options, :caption, caption)
-
-        @markdown_to_html_parse_mode ->
-          caption = Telegex.Marked.as_html(caption)
-
-          options
-          |> Keyword.put(:caption, caption)
-          |> Keyword.put(:parse_mode, "HTML")
-
-        _ ->
-          options
-      end
-    else
-      options
-    end
-  end
-
-  @doc """
-  发送图片。
-
-  参数 `options` 参考 `Telegex.send_photo/3` 的 `optinal` 说明。除此之外，还有一些附加参数支持以及默认值。
-  ## 附加可选参数和默认值
-  - `disable_notification`: 默认值为 `true`。
-  - `parse_mode`: 默认值为 `MarkdownV2`。
-  - `retry`: 附加参数，表示发送失败时自动重试的最大次数，默认值为 `5`。
-  """
-  @spec send_photo(integer, String.t(), send_photo_opts) :: {:ok, tgmsg} | tgerror
-  def send_photo(chat_id, photo, options \\ []) do
-    options = preprocess_send_photo_options(options)
-
-    case Telegex.send_photo(chat_id, photo, options) do
-      {:ok, message} ->
-        {:ok, message}
-
-      {:error, %Telegex.Model.RequestError{reason: :timeout}} = e ->
-        # 处理重试（减少次数并递归）
-        retry = options |> Keyword.get(:retry)
-
-        if retry && retry > 0 do
-          Logger.warning(
-            "Message sending timeout, waiting for retry: #{inspect(remaining_times: retry - 1, chat_id: chat_id)}"
-          )
-
-          options = options |> Keyword.put(:retry, retry - 1)
-          send_photo(chat_id, photo, options)
-        else
-          e
-        end
-
-      {:error, %Telegex.Model.Error{description: <<"Too Many Requests: retry after">> <> _rest}} =
-          e ->
-        retry = options |> Keyword.get(:retry)
-
-        if retry && retry > 0 do
-          Logger.warning(
-            "Too many requests have been limited from sending messages: #{inspect(remaining_times: retry - 1, chat_id: chat_id)}"
-          )
-
-          options = options |> Keyword.put(:retry, retry - 1)
-          :timer.sleep(trunc(800 * retry * Enum.random(@time_seeds)))
-          send_photo(chat_id, photo, options)
-        else
-          e
-        end
-
-      e ->
-        e
-    end
-  end
-
-  @doc """
-  编辑消息。
-
-  如果 `options` 参数中不包含以下配置，将为它们准备默认值：
-  - `parse_mode`: `"MarkdownV2"`
-  - `disable_web_page_preview`: `false`
-  """
-  @spec edit_message_text(String.t(), keyword) :: {:ok, tgmsg} | tgerror
-  def edit_message_text(text, options \\ []) do
-    options =
-      options
-      |> Keyword.put_new(:parse_mode, @markdown_parse_mode)
-      |> Keyword.put_new(:disable_web_page_preview, true)
-      |> delete_keyword_nils()
-
-    text =
-      if(options |> Keyword.get(:parse_mode) == @markdown_parse_mode) do
-        escape_marked(text)
-      else
-        text
-      end
-
-    Telegex.edit_message_text(text, options)
-  end
-
-  @doc """
-  回复文本消息。
-  其 `message_id` 参数的值会合并到 `options` 参数中的 `reply_to_message_id` 配置中。其余请参考 `send_message/3`
-  """
-  def reply_message(chat_id, message_id, text, options \\ []) do
-    options = options |> Keyword.merge(reply_to_message_id: message_id)
-
-    send_message(chat_id, text, options)
-  end
-
   @default_restrict_permissions %Telegex.Model.ChatPermissions{
     can_send_messages: false,
     can_send_media_messages: false,
@@ -325,7 +73,7 @@ defmodule PolicrMiniBot.Helper do
   附加的 `options` 参数可配置 `delay_seconds` 实现延迟删除。
   注意，延迟删除无法直接获得请求结果，将直接返回 `:ok`。
   """
-  @spec delete_message(integer, integer, [{atom, any}]) :: {:ok, true} | tgerror
+  @spec delete_message(integer, integer, [{atom, any}]) :: {:ok, true} | tgerr
   def delete_message(chat_id, message_id, options \\ []) do
     delay_seconds =
       options
@@ -379,10 +127,12 @@ defmodule PolicrMiniBot.Helper do
   @doc """
   让机器人显示正常打字的动作。
   """
-  @spec typing(integer) :: {:ok, boolean} | tgerror
+  @spec typing(integer) :: {:ok, boolean} | tgerr
   def typing(chat_id) do
     Telegex.send_chat_action(chat_id, "typing")
   end
+
+  @markdown_parse_mode "MarkdownV2"
 
   @type mention_opts :: [
           {:parse_mode, String.t()},
@@ -566,33 +316,6 @@ defmodule PolicrMiniBot.Helper do
     PolicrMini.DefaultsServer.get_scheme_value(field)
   end
 
-  @spec t(String.t(), map()) :: String.t()
-  @doc """
-  使用默认 `locale` 搜索国际化翻译。
-  """
-  def t(key, values \\ %{}) do
-    t(ExI18n.locale(), key, values)
-  end
-
-  @doc """
-  搜索国际化翻译。
-
-  参数 `locale` 为 `priv/locals` 中 `yml` 文件的名称。
-  参数 `values` 用于给翻译字符串中的变量赋值。
-  """
-  @spec t(String.t(), String.t(), map()) :: String.t()
-  def t(locale, key, values)
-      when is_binary(locale) and is_binary(key) and is_map(values) do
-    try do
-      ExI18n.t(locale, key, values)
-    rescue
-      e ->
-        Logger.error("Translation search failed: #{inspect(key: key, error: e)}")
-
-        String.replace("#{locale}:#{key}", "_", "\\_")
-    end
-  end
-
   @spec async_run(function, delay_secs: integer) :: Honeydew.Job.t() | no_return
   defdelegate async_run(fun, opts \\ []), to: PolicrMini.Worker.GeneralRun, as: :async_run
 
@@ -624,59 +347,6 @@ defmodule PolicrMiniBot.Helper do
     [_, version | args] = data |> String.split(":")
 
     {version, args}
-  end
-
-  @doc """
-  和发送相关的扩展函数，支持（由于网络或速率限制导致的）自动重试。
-
-  此函数需要返回 `Telegex.send_*` 函数的返回值。
-
-  ## 可选参数
-  - `:retry`: 重试次数，默认值为 0。
-  """
-  def send_extended(options \\ [], do: block) do
-    retry = Keyword.get(options, :retry, 0)
-
-    case block do
-      {:ok, _} = r ->
-        r
-
-      {:error, %Telegex.Model.RequestError{reason: :timeout}} = e ->
-        if retry > 0 do
-          send_extended(Keyword.merge(options, retry: retry - 1), do: block)
-        else
-          e
-        end
-
-      {:error, %Telegex.Model.Error{description: <<"Too Many Requests: retry after">> <> _rest}} =
-          e ->
-        # 随机暂停以减缓发送速率，提高重试成功率。
-        :timer.sleep(trunc(800 * retry * Enum.random(@time_seeds)))
-
-        if retry > 0 do
-          send_extended(Keyword.merge(options, retry: retry - 1), do: block)
-        else
-          e
-        end
-
-      e ->
-        e
-    end
-  end
-
-  defmacro commands_text(msg_id, bindings \\ []) do
-    msg_id =
-      cond do
-        is_binary(msg_id) ->
-          String.trim(msg_id)
-
-        true ->
-          msg_id
-      end
-
-    quote do
-      dgettext("commands", unquote(msg_id), unquote(bindings))
-    end
   end
 
   @doc """

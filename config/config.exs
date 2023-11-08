@@ -47,9 +47,8 @@ config :policr_mini, PolicrMiniBot.Scheduler,
     ]
   ]
 
-# 配置 Marked
-config :policr_mini,
-  marked_enabled: true
+# 配置默认语言
+config :policr_mini, PolicrMiniWeb.Gettext, default_locale: "zh"
 
 # 配置 Telegex
 config :telegex,
@@ -59,20 +58,10 @@ config :telegex,
 # Configures Elixir's Logger
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [:request_id, :chat_id]
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
-
-# Internationalization of bot messages
-config :exi18n,
-  default_locale: "zh-hans",
-  locales: ~w(zh-hans),
-  fallback: false,
-  loader: :yml,
-  loader_options: %{path: {:policr_mini, "priv/locales"}},
-  var_prefix: "%{",
-  var_suffix: "}"
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

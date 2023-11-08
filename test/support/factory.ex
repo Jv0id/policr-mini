@@ -35,7 +35,7 @@ defmodule PolicrMini.Factory do
   end
 
   def build(:custom_kit) do
-    %PolicrMini.Schema.CustomKit{
+    %PolicrMini.Chats.CustomKit{
       title: "猫吃老鼠吗？",
       answers: ["+吃", "-不吃"]
     }
@@ -53,25 +53,15 @@ defmodule PolicrMini.Factory do
     }
   end
 
-  def build(:message_snapshot) do
-    %PolicrMini.Schema.MessageSnapshot{
-      message_id: 1234,
-      from_user_id: 123_456_789,
-      from_user_name: "小新",
-      date: 1_591_654_677,
-      text: "请回答问题「1 + 1 = ?」。您有 20 秒的时间通过此验证，超时将从群组【Elixir 中文交流】中封禁。",
-      markup_body: "[3](101:1) [2](101:2)"
-    }
-  end
-
   def build(:verification) do
-    %PolicrMini.Schema.Verification{
+    %PolicrMini.Chats.Verification{
       target_user_id: 491_837_624,
       target_user_name: "小明",
       message_id: 1234,
       indices: [1, 3],
       seconds: 60,
-      status: 0
+      status: 0,
+      source: :joined
     }
   end
 
@@ -103,7 +93,7 @@ defmodule PolicrMini.Factory do
     %PolicrMini.Instances.ThirdParty{
       name: "开发实例",
       bot_username: "policr_mini_dev_bot",
-      homepage: "https://mini-dev.telestd.me",
+      homepage: "https://mini-dev.tcore.app",
       running_days: 1,
       version: "0.0.1-rc.0",
       is_forked: false

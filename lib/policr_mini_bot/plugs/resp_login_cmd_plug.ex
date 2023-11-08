@@ -10,6 +10,10 @@ defmodule PolicrMiniBot.RespLoginCmdPlug do
 
   require Logger
 
+  @sync_comment_text commands_text(
+                       "如果您确定自己是群管理员，且群组中的确使用了本机器人。请通知群主或其它管理员在群内使用 %{command} 命令同步最新数据。",
+                       command: "`/sync`"
+                     )
   @doc """
   处理登录命令。
 
@@ -20,10 +24,28 @@ defmodule PolicrMiniBot.RespLoginCmdPlug do
 
     with {:ok, :isadmin} <- check_user(user_id),
          {:ok, token} <- PolicrMiniWeb.create_token(user_id) do
-      text = t("login.success", %{token: token})
+      theader = commands_text("已为您创建一枚令牌，点击下方按钮可直接进入后台。亦或复制令牌手动登入。")
+
+      tfooter =
+        commands_text("有效期为 %{day_count} 天，过期需重新申请和登入。如怀疑泄漏请立即吊销。",
+          day_count: 1
+        )
+
+      tcomment = commands_text("安全小贴士：不可将按钮中的链接或登录令牌分享于他人，除非您想将控制权短暂的共享于他。")
+
+      text = """
+      #{theader}
+
+      <code>#{token}</code>
+
+      #{tfooter}
+
+      <i>#{tcomment}</i>
+      """
+
       reply_markup = make_markup(user_id, token)
 
-      case send_message(chat_id, text, reply_markup: reply_markup, parse_mode: "MarkdownV2ToHTML") do
+      case send_text(chat_id, text, reply_markup: reply_markup, parse_mode: "HTML") do
         {:ok, _} ->
           {:ok, state}
 
@@ -34,12 +56,34 @@ defmodule PolicrMiniBot.RespLoginCmdPlug do
       end
     else
       {:error, :nonadmin} ->
-        send_message(chat_id, t("login.non_admin"), parse_mode: "MarkdownV2ToHTML")
+        theader = commands_text("未找到和您相关的权限记录")
+
+        tcomment = @sync_comment_text
+
+        text = """
+        <b>#{theader}</b>
+
+        <i>#{tcomment}</i>
+        """
+
+        # 由于依赖 `@sync_comment_text` 此处只能以 HTML 发送
+        send_text(chat_id, text, parse_mode: "HTML", logging: true)
 
         {:ok, state}
 
       {:error, :notfound} ->
-        send_message(chat_id, t("login.not_found"), parse_mode: "MarkdownV2ToHTML")
+        theader = commands_text("未找到和您相关的用户记录")
+
+        tcomment = @sync_comment_text
+
+        text = """
+        <b>#{theader}</b>
+
+        <i>#{tcomment}</i>
+        """
+
+        # 由于依赖 `@sync_comment_text` 此处只能以 HTML 发送
+        send_text(chat_id, text, parse_mode: "HTML", logging: true)
 
         {:ok, state}
     end
@@ -47,11 +91,11 @@ defmodule PolicrMiniBot.RespLoginCmdPlug do
 
   def handle(message, state) do
     %{chat: %{id: chat_id}, message_id: message_id} = message
-    text = t("login.only_private")
+    text = commands_text("请在私聊中使用此命令。")
 
-    case reply_message(chat_id, message_id, text) do
-      {:ok, sended_message} ->
-        Worker.async_delete_message(chat_id, sended_message.message_id, delay_secs: 8)
+    case send_text(chat_id, text, reply_to_message_id: message_id) do
+      {:ok, %{message_id: message_id}} ->
+        Worker.async_delete_message(chat_id, message_id, delay_secs: 8)
 
       {:error, reason} ->
         Logger.error("Command response failed: #{inspect(command: "/login", reason: reason)}")
@@ -70,13 +114,13 @@ defmodule PolicrMiniBot.RespLoginCmdPlug do
       inline_keyboard: [
         [
           %InlineKeyboardButton{
-            text: t("login.revoke_text"),
+            text: commands_text("吊销全部令牌"),
             callback_data: "revoke:v1:#{user_id}"
           }
         ],
         [
           %InlineKeyboardButton{
-            text: t("login.join_text"),
+            text: commands_text("进入后台"),
             url: "#{root_url}/admin?token=#{token}"
           }
         ]
