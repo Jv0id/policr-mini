@@ -74,26 +74,11 @@ defmodule PolicrMini.Factory do
     }
   end
 
-  def build(:statistic) do
-    utc_now_date = Date.utc_today()
-
-    begin_at = DateTime.new!(utc_now_date, ~T[00:00:00], "Etc/UTC")
-    end_at = DateTime.add(begin_at, 3600 * 24 - 1, :second)
-
-    %PolicrMini.Chats.Statistic{
-      verifications_count: 0,
-      languages_top: %{},
-      begin_at: begin_at,
-      end_at: end_at,
-      verification_status: :other
-    }
-  end
-
   def build(:third_party) do
     %PolicrMini.Instances.ThirdParty{
       name: "开发实例",
       bot_username: "policr_mini_dev_bot",
-      homepage: "https://mini-dev.tcore.app",
+      homepage: "https://mini-dev.gramlabs.org",
       running_days: 1,
       version: "0.0.1-rc.0",
       is_forked: false

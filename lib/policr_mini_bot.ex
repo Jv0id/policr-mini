@@ -1,32 +1,81 @@
 defmodule PolicrMiniBot do
-  @moduledoc """
-  机器人功能。
-  """
+  @moduledoc false
 
-  alias PolicrMiniBot.UpdatesPoller.BotInfo
+  alias :ets, as: ETS
+  alias __MODULE__.BootHelper
 
-  defmacro __using__(plug: opts) do
-    quote do
-      import PolicrMiniBot.{Common, Helper, State}
+  require Logger
 
-      use PolicrMini.I18n
-      use PolicrMiniBot.MessageCaller
+  # 注意：当前并未依赖对编辑消息、频道消息、内联查询等更新类型的接收才能实现的功能，如有需要需提前更新此列表。
+  @allowed_updates [
+    "message",
+    "callback_query",
+    "my_chat_member",
+    "chat_member",
+    "chat_join_request"
+  ]
 
-      alias Telegex.Model.{
-        Update,
-        Message,
-        CallbackQuery,
-        InlineKeyboardMarkup,
-        InlineKeyboardButton
-      }
+  def allowed_updates, do: @allowed_updates
 
-      use Telegex.Plug.Presets, unquote(opts)
+  defmodule Info do
+    @moduledoc false
+
+    def from(bot_info: bot_info) when is_struct(bot_info, __MODULE__) do
+      bot_info
+    end
+
+    use TypedStruct
+
+    typedstruct do
+      field :id, integer
+      field :username, String.t()
+      field :name, String.t()
+      field :photo_file_id, String.t()
+      field :is_third_party, boolean
     end
   end
 
-  defmacro __using__(:plug) do
-    quote do
-      use Telegex.Plug
+  defmodule Chain do
+    @moduledoc false
+
+    defmacro __using__(opts) do
+      quote do
+        use Telegex.Chain, unquote(opts)
+        use PolicrMini.I18n
+        use PolicrMiniBot.MessageCaller
+
+        import PolicrMiniBot.ChainContext
+        import PolicrMiniBot.Helper
+
+        alias PolicrMiniBot.ChainContext
+      end
+    end
+  end
+
+  @doc """
+  初始化机器人。
+
+  包括获取机器人必要信息、缓存机器人数据、生成命令列表等操作。通常在机器人启动时调用。
+  """
+  @spec init :: Info.t()
+  def init do
+    if ETS.whereis(Info) == :undefined do
+      # 获取机器人必要信息。
+      Logger.info("Checking bot information...")
+      %{username: username} = bot_info = BootHelper.fetch_bot_info()
+
+      # 使用 Ets 缓存机器人数据。
+      ETS.new(Info, [:set, :named_table])
+      ETS.insert(Info, {:bot_info, bot_info})
+
+      if config_get(:auto_gen_commands) do
+        # 生成命令列表。
+        BootHelper.gen_commands(username)
+      end
+
+      bot_info
+    else
+      Info.from(ETS.lookup(Info, :bot_info))
     end
   end
 
@@ -65,9 +114,9 @@ defmodule PolicrMiniBot do
     end
   end
 
-  @spec info :: BotInfo.t() | nil
+  @spec info :: Info.t() | nil
   def info() do
-    case :ets.lookup(BotInfo, :bot_info) do
+    case ETS.lookup(Info, :bot_info) do
       [{:bot_info, value}] ->
         value
 
@@ -76,30 +125,21 @@ defmodule PolicrMiniBot do
     end
   end
 
-  @official_bots ["policr_mini_bot", "policr_mini_test_bot"]
+  @official_bots ["policr_mini_bot", "policr_mini_dev_bot", "policr_mini_pre_bot"]
+
   def official_bots, do: @official_bots
 
-  @type config_key :: :auto_gen_commands | :owner_id | :name | :unban_method | :opts
+  @type config_key ::
+          :work_mode
+          | :auto_gen_commands
+          | :mosaic_method
+          | :owner_id
+          | :name
+          | :unban_method
+          | :opts
 
-  @spec config(config_key, any) :: any
-  def config(key, default \\ nil) do
+  @spec config_get(config_key, any) :: any
+  def config_get(key, default \\ nil) do
     Application.get_env(:policr_mini, __MODULE__)[key] || default
-  end
-
-  @config_opts ["--independent"]
-
-  @doc """
-  检查可选项是否存在。
-
-  ## 当前存在以下可选项：
-    - `--independent`: 启用独立运营
-
-  ## 例子
-      iex> PolicrMiniBot.opt_exist?("--independent")
-      false
-  """
-  @spec opt_exist?(String.t()) :: boolean
-  def opt_exist?(opt_name) when opt_name in @config_opts do
-    Enum.member?(config(:opts, []), opt_name)
   end
 end

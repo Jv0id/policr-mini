@@ -6,15 +6,16 @@ defmodule PolicrMini.Chats do
   import Ecto.Query, only: [from: 2, dynamic: 2]
 
   alias PolicrMini.Repo
-  alias PolicrMini.Chats.{Scheme, Operation, Statistic, CustomKit, Verification}
+  alias PolicrMini.Chats.{Scheme, Operation, CustomKit, Verification}
   alias PolicrMini.Chats.CustomKit
   alias PolicrMini.Schema.Permission
+
+  require Logger
 
   @type vsource :: :joined | :join_request
 
   @type scheme_change_result :: {:ok, Scheme.t()} | {:error, Ecto.Changeset.t()}
   @type operation_written_result :: {:ok, Operation.t()} | {:error, Ecto.Changeset.t()}
-  @type statistic_written_result :: {:ok, Statistic.t()} | {:error, Ecto.Changeset.t()}
   @type custom_kit_change_result :: {:ok, CustomKit.t()} | {:error, Ecto.Changeset.t()}
   @type verification_change_result :: {:ok, Verification.t()} | {:error, Ecto.Changeset.t()}
 
@@ -202,91 +203,6 @@ defmodule PolicrMini.Chats do
     |> Repo.preload(preload)
   end
 
-  @spec find_today_stat(integer, stat_status) :: Statistic.t() | nil
-  def find_today_stat(chat_id, status), do: find_statistic(chat_id, status, range: :today)
-
-  @spec find_yesterday_stat(integer, stat_status) :: Statistic.t() | nil
-  def find_yesterday_stat(chat_id, status), do: find_statistic(chat_id, status, range: :yesterday)
-
-  @type stat_dt_cont ::
-          [{:range, :today | :yesterday}] | [{:begin_at, DateTime.t()}, {:end_at, DateTime.t()}]
-
-  @spec find_statistic(integer, stat_status, stat_dt_cont) :: Statistic.t() | nil
-  defp find_statistic(chat_id, status, stat_dt_cont) do
-    {begin_at, end_at} =
-      case Keyword.get(stat_dt_cont, :range) do
-        :today -> Statistic.today_datetimes()
-        :yesterday -> Statistic.yesterday_datetimes()
-        nil -> {Keyword.get(stat_dt_cont, :begin_at), Keyword.get(stat_dt_cont, :end_at)}
-      end
-
-    from(
-      s in Statistic,
-      where:
-        s.chat_id == ^chat_id and
-          s.verification_status == ^status and
-          s.begin_at == ^begin_at and
-          s.end_at == ^end_at
-    )
-    |> Repo.one()
-  end
-
-  @spec create_statistic(map) :: statistic_written_result
-  def create_statistic(params) do
-    %Statistic{} |> Statistic.changeset(params) |> Repo.insert()
-  end
-
-  @spec update_statistic(Statistic.t(), map) :: statistic_written_result
-  def update_statistic(statistic, params) do
-    statistic |> Statistic.changeset(params) |> Repo.update()
-  end
-
-  def get_or_create_today_stat(chat_id, status, params) do
-    case find_today_stat(chat_id, status) do
-      nil -> create_statistic(params)
-      stat -> {:ok, stat}
-    end
-  end
-
-  @doc """
-  自增一个统计。
-  """
-  @spec increment_statistic(integer | binary, String.t(), stat_status) :: statistic_written_result
-
-  def increment_statistic(chat_id, language_code, status) do
-    language_code = language_code || "unknown"
-    {begin_at, end_at} = Statistic.today_datetimes()
-
-    params = %{
-      chat_id: chat_id,
-      verifications_count: 0,
-      languages_top: %{language_code => 0},
-      begin_at: begin_at,
-      end_at: end_at,
-      verification_status: status
-    }
-
-    case get_or_create_today_stat(chat_id, status, params) do
-      {:ok, stat} ->
-        verifications_count = stat.verifications_count + 1
-
-        languages_top =
-          if count = stat.languages_top[language_code] do
-            Map.put(stat.languages_top, language_code, count + 1)
-          else
-            Map.put(stat.languages_top, language_code, 1)
-          end
-
-        update_statistic(stat, %{
-          verifications_count: verifications_count,
-          languages_top: languages_top
-        })
-
-      e ->
-        e
-    end
-  end
-
   # TODO: 添加测试
   @spec get_custom_kits_count(integer | binary) :: integer()
   def get_custom_kits_count(chat_id) do
@@ -341,10 +257,11 @@ defmodule PolicrMini.Chats do
 
   @doc """
   获取或创建指定群聊和用户的等待完成验证。
+
+  函数名缩写来源：`get_cr_pend_verif` -> `get_or_create_pending_verification`。
   """
-  @spec get_or_create_pending_verification(integer, integer, map) ::
-          verification_change_result
-  def get_or_create_pending_verification(chat_id, target_user_id, params \\ %{}) do
+  @spec get_cr_pend_verif(integer, integer, map) :: verification_change_result
+  def get_cr_pend_verif(chat_id, target_user_id, params \\ %{}) do
     case find_pending_verification(chat_id, target_user_id) do
       nil ->
         params =
@@ -517,6 +434,31 @@ defmodule PolicrMini.Chats do
   end
 
   @doc """
+  自增指定验证的发送次数。
+  """
+  @spec increase_verification_send_times(integer) :: :ok | :ignore
+  def increase_verification_send_times(id) when not is_nil(id) do
+    case Repo.update_all(from(v in Verification, where: v.id == ^id, select: v.send_times),
+           inc: [send_times: 1]
+         ) do
+      {1, _} ->
+        :ok
+
+      {count, r} when count > 1 ->
+        # TODO: 完善：进入此分支后回滚更新。
+        # 自增发送次数的验证不止一个
+        Logger.warning(
+          "Increase verification send times, but more than one verification found: #{inspect(count: count, result: r)}"
+        )
+
+        :ok
+
+      {0, _} ->
+        :ignore
+    end
+  end
+
+  @doc """
   查找指定群聊中指定用户的权限。
   """
   @spec find_user_permission(integer, integer) :: Permission.t() | nil
@@ -551,5 +493,19 @@ defmodule PolicrMini.Chats do
     else
       []
     end
+  end
+
+  @doc """
+  获取指定时间区间内的验证列表，不包含正在进行的验证。
+  """
+  @spec time_range_verfs(integer, DateTime.t(), DateTime.t()) :: [Verification.t()]
+  def time_range_verfs(chat_id, dstart, dend) do
+    from(v in Verification,
+      where: v.chat_id == ^chat_id,
+      where: v.inserted_at >= ^dstart,
+      where: v.updated_at <= ^dend,
+      where: v.status != :waiting
+    )
+    |> Repo.all()
   end
 end

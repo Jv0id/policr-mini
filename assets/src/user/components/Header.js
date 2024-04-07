@@ -46,7 +46,7 @@ const buildPageContentMissingConfirm = ({ title }) => (
       <a
         tw="text-blue-600"
         target="_blank"
-        href="https://mini.tcore.app/community"
+        href="https://mini.gramlabs.org/community"
       >
         社群
       </a>
@@ -124,23 +124,15 @@ export default () => {
           <RouteMenuLink to="/">
             <MenuText>首页</MenuText>
           </RouteMenuLink>
+          <MenuLink target="_blank" href="https://blog.gramlabs.org/">
+            <MenuText>博客</MenuText>
+          </MenuLink>
+          <MenuLink target="_blank" href="https://mini.gramlabs.org/community">
+            <MenuText>社群</MenuText>
+          </MenuLink>
           <RouteMenuLink to="/login">
             <MenuText>后台</MenuText>
           </RouteMenuLink>
-          <MenuLink target="_blank" href="https://mini.tcore.app/community">
-            <MenuText>社群</MenuText>
-          </MenuLink>
-          <MenuLink
-            onClick={() => {
-              dispatch(
-                openModal({
-                  content: buildPageContentMissingConfirm({ title: "维基" }),
-                })
-              );
-            }}
-          >
-            <MenuText>维基</MenuText>
-          </MenuLink>
           <MenuLink
             onClick={() => {
               dispatch(

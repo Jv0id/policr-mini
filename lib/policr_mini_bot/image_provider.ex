@@ -3,6 +3,12 @@ defmodule PolicrMiniBot.ImageProvider do
   图片供应商。
   """
 
+  # TODO: 将此模块改为基于 GenServer，以便捕获更多有关进程重启的细节。
+
+  use Agent
+
+  require Logger
+
   defmodule I18nStr do
     @moduledoc false
     defstruct [:zh_hans, :zh_hant, :en]
@@ -22,6 +28,19 @@ defmodule PolicrMiniBot.ImageProvider do
     end
   end
 
+  defmodule Image do
+    @moduledoc """
+    单张图片。
+    """
+
+    defstruct [:name, :path]
+
+    @type t :: %__MODULE__{
+            name: binary | nil,
+            path: binary
+          }
+  end
+
   defmodule Album do
     @moduledoc """
     一个图集。表示一个图片分类，在清单结构中，它包含了本类别的所有图片。
@@ -32,7 +51,7 @@ defmodule PolicrMiniBot.ImageProvider do
             id: binary,
             name: I18nStr.t(),
             parents: [binary],
-            images: [binary]
+            images: [Image.t()]
           }
 
     def new(%{"id" => id, "name" => name, "parents" => parents}) do
@@ -140,27 +159,16 @@ defmodule PolicrMiniBot.ImageProvider do
     end
   end
 
-  defmodule Image do
-    @moduledoc """
-    单张图片。
-    """
-
-    defstruct [:name, :path]
-
-    @type t :: %__MODULE__{
-            name: binary | nil,
-            path: binary
-          }
-  end
-
-  use Agent
-
   def start_link(_) do
     manifest = gen_manifest(albums_root())
 
     state = %{manifest: manifest}
 
-    Agent.start_link(fn -> state end, name: __MODULE__)
+    {:ok, _pid} = ok_r = Agent.start_link(fn -> state end, name: __MODULE__)
+
+    Logger.info("Image provider started")
+
+    ok_r
   end
 
   @spec manifest() :: Manifest.t()
@@ -208,31 +216,47 @@ defmodule PolicrMiniBot.ImageProvider do
   end
 
   @doc """
-  生成无图集冲突图片列表。
-
-  注意：如果生成不了指定的最大数量（例如图集数量不够，或者满足不冲突关系的图集数量不够），将会返回小于指定的最大数量的图片列表。
+  生成无图集冲突的图片列表（包含名称）。
   """
-  @spec bomb(integer) :: [Image.t()]
-  def bomb(max_count) do
-    Agent.get(__MODULE__, &gen_strategy(&1, max_count))
+  @spec random_images(integer) :: [Image.t()]
+  def random_images(max_count) do
+    gen_fun = fn
+      %{manifest: nil} ->
+        []
+
+      %{manifest: manifest} ->
+        manifest.albums
+        |> conflict_free_albums(max_count)
+        |> Enum.map(fn album ->
+          image = Enum.random(album.images)
+
+          %{image | name: album.name}
+        end)
+    end
+
+    Agent.get(__MODULE__, gen_fun)
   end
 
-  defp gen_strategy(%{manifest: nil}, _max_count) do
-    []
+  @doc """
+  生成期待数量的随机图集列表。
+
+  如果图集数量不够，可能会返回低于 `expected_count` 的长度的列表，甚至返回空列表。
+  """
+  @spec random_albums(non_neg_integer) :: [Album.t()]
+  def random_albums(expected_count) do
+    gen_fun = fn
+      %{manifest: nil} ->
+        []
+
+      %{manifest: manifest} ->
+        conflict_free_albums(manifest.albums, expected_count)
+    end
+
+    Agent.get(__MODULE__, gen_fun)
   end
 
-  defp gen_strategy(%{manifest: manifest}, max_count) do
-    manifest.albums
-    |> conflict_free_gen(max_count)
-    |> Enum.map(fn album ->
-      image = Enum.random(album.images)
-
-      %{image | name: album.name}
-    end)
-  end
-
-  @spec conflict_free_gen([Album.t()], integer) :: [Album.t()]
-  defp conflict_free_gen(albums, max_count, results \\ []) do
+  @spec conflict_free_albums([Album.t()], integer) :: [Album.t()]
+  defp conflict_free_albums(albums, max_count, results \\ []) do
     if max_count == 0 || Enum.empty?(albums) do
       results
     else
@@ -251,7 +275,7 @@ defmodule PolicrMiniBot.ImageProvider do
             current.parents -- album.parents == current.parents
         end)
 
-      conflict_free_gen(albums, max_count - 1, results ++ [current])
+      conflict_free_albums(albums, max_count - 1, results ++ [current])
     end
   end
 
@@ -262,7 +286,8 @@ defmodule PolicrMiniBot.ImageProvider do
     files = File.ls!(album_path)
 
     format_included = fn path ->
-      format = path |> Path.extname() |> String.slice(1..-1)
+      # 范围中的 `1//1` 表示将 start > stop 的范围显式标记为递增，
+      format = path |> Path.extname() |> String.slice(1..-1//1)
 
       Enum.member?(include_formats, format)
     end
@@ -274,5 +299,10 @@ defmodule PolicrMiniBot.ImageProvider do
     |> Enum.filter(fn path -> !File.dir?(path) && format_included.(path) end)
     # 构造成图片结构体
     |> Enum.map(fn path -> %Image{path: path} end)
+  rescue
+    e ->
+      Logger.error("Scanning album images failed: #{inspect(exception: e)}")
+
+      []
   end
 end

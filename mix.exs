@@ -5,7 +5,7 @@ defmodule PolicrMini.MixProject do
     [
       app: :policr_mini,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      elixir: "~> 1.16",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
@@ -44,12 +44,13 @@ defmodule PolicrMini.MixProject do
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:telegex, git: "https://github.com/Hentioe/telegex.git", branch: "api_5.4-dev"},
-      {:telegex_plug, "~> 0.3"},
+      {:rustler, "~> 0.32.1", runtime: false},
+      {:benchee, "~> 1.0", only: :dev},
+      {:telegex, git: "https://github.com/Hentioe/telegex.git", branch: "v1.6"},
       {:phoenix, "~> 1.5"},
       {:phoenix_ecto, "~> 4.2"},
       {:postgrex, "~> 0.17"},
-      {:ecto_sql, "~> 3.10"},
+      {:ecto_sql, "~> 3.11"},
       {:ecto_enum, "~> 1.4"},
       {:typed_struct, "~> 0.2"},
       {:phoenix_html, "~> 2.14"},
@@ -60,20 +61,24 @@ defmodule PolicrMini.MixProject do
       {:telemetry_poller, "~> 0.5"},
       {:gettext, "~> 0.22"},
       {:jason, "~> 1.4"},
+      {:tarams, "~> 1.8"},
       {:plug_cowboy, "~> 2.6"},
+      {:remote_ip, "~> 1.1"},
       {:quantum, "~> 3.5"},
       {:honeydew, "~> 1.5"},
       {:cachex, "~> 3.6"},
-      {:httpoison, "~> 1.8"},
-      {:casex, "~> 0.4"},
+      {:finch, "~> 0.18.0"},
+      {:multipart, "~> 0.4.0"},
+      {:casex, "~> 0.4.2"},
       {:earmark, "~> 1.4"},
       {:uuid, "~> 2.0", hex: :uuid_erl},
-      {:not_qwerty123, "~> 2.3"},
-      {:yaml_elixir, "~> 2.7"},
-      {:unzip, "~> 0.8"},
+      {:yaml_elixir, "~> 2.9"},
+      {:unzip, "~> 0.11"},
       {:mime, "~> 2.0"},
-      # TODO: 使用 Telegex 1.0+ 以后（HTTP 客户端改为 Finch），此依赖将会移除。
-      {:ssl_verify_fun, "~> 1.1", override: true}
+      {:instream, "~> 2.2"},
+      {:figlet, git: "https://github.com/Hentioe/figlet", branch: "compatible_1.16"},
+      # 此库依赖 Rust
+      {:img_grider, git: "https://github.com/gramlabs-oss/img_grider.git"}
     ]
   end
 

@@ -14,8 +14,7 @@ defmodule PolicrMiniBot.Runner.WorkingChecker do
   use PolicrMini.I18n
   use PolicrMiniBot.MessageCaller
 
-  # TODO: 移除此处的 `only` 选项。
-  import PolicrMiniBot.Helper, only: [async: 1]
+  import PolicrMiniBot.Helper
 
   require Logger
 
@@ -69,30 +68,31 @@ defmodule PolicrMiniBot.Runner.WorkingChecker do
         # 检查权限并执行相应修正
 
         cond do
-          member.can_send_messages == false ->
-            # 如果没有发消息权限，直接退出
-            Telegex.leave_chat(chat.id)
-
-            Logger.info(
-              "Missing permission to send message, automatically left the chat: #{inspect(chat_id: chat.id)}"
+          can_send_messages?(member) == false ->
+            # 如果没有发消息权限，直接退出。
+            Logger.warning(
+              "Missing permission to send messages, automatically left",
+              chat_id: chat.id
             )
 
-          member.status != "administrator" ->
-            # 如果不是管理员，取消接管
+            Telegex.leave_chat(chat.id)
+
+          is_administrator?(member) == false ->
+            # 如果不是管理员，取消接管。
             cancel_takeover(chat,
               reason: :non_admin,
               text: no_permission_message()
             )
 
-          member.can_restrict_members == false ->
-            # 如果没有限制用户的权限，取消接管
+          can_restrict_members?(member) == false ->
+            # 如果没有限制用户的权限，取消接管。
             cancel_takeover(chat,
               reason: :missing_permissions,
               text: no_permission_message()
             )
 
-          member.can_delete_messages == false ->
-            # 如果没有删除消息的权限，取消接管
+          can_delete_messages?(member) == false ->
+            # 如果没有删除消息的权限，取消接管。
             cancel_takeover(chat,
               reason: :missing_permissions,
               text: no_permission_message()
@@ -103,7 +103,7 @@ defmodule PolicrMiniBot.Runner.WorkingChecker do
             :ok
         end
 
-      {:error, %Telegex.Model.RequestError{reason: :timeout}} ->
+      {:error, %Telegex.RequestError{reason: :timeout}} ->
         # 处理超时，自动重试
         Logger.warning(
           "Checking own permission timeout, waiting for retry: #{inspect(chat_id: chat.id)}"
@@ -130,24 +130,24 @@ defmodule PolicrMiniBot.Runner.WorkingChecker do
   @err_desc_was_upgraded_supergroup "Bad Request: group chat was upgraded to a supergroup chat"
 
   # 机器人被封禁，取消接管。
-  defp handle_check_error(%Telegex.Model.Error{description: description}, chat)
+  defp handle_check_error(%Telegex.Error{description: description}, chat)
        when description == @err_desc_bot_was_kicked,
        do: cancel_takeover(chat, reason: :kicked)
 
   # 机器人已不在群中，取消接管。
-  defp handle_check_error(%Telegex.Model.Error{description: description}, chat)
+  defp handle_check_error(%Telegex.Error{description: description}, chat)
        when description in @err_desc_bot_is_not_member,
        do: cancel_takeover(chat, reason: :left)
 
   # 已被升级为超级群，取消接管。
   # 一些未经证实的猜测：
   # 此错误提示表示旧群 ID 仍然被 TG 识别，但是 ID 的作用已被废弃。理论上这类群组需要清理，否则会出现资料重复的群组。
-  defp handle_check_error(%Telegex.Model.Error{description: description}, chat)
+  defp handle_check_error(%Telegex.Error{description: description}, chat)
        when description == @err_desc_was_upgraded_supergroup,
        do: cancel_takeover(chat, reason: :upgraded)
 
   # 群组已不存在。取消接管，并删除与之相关的用户权限。
-  defp handle_check_error(%Telegex.Model.Error{description: description}, chat)
+  defp handle_check_error(%Telegex.Error{description: description}, chat)
        when description == @err_desc_chat_not_found do
     cancel_takeover(chat, reason: :not_found)
 

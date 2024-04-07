@@ -1,8 +1,4 @@
 defmodule PolicrMiniWeb.Admin.API.ChatController do
-  @moduledoc """
-  和 Chat 相关的后台 API 控制器。
-  """
-
   use PolicrMiniWeb, :controller
 
   alias PolicrMini.{
@@ -13,11 +9,14 @@ defmodule PolicrMiniWeb.Admin.API.ChatController do
   }
 
   alias PolicrMini.Instances.Chat
-  alias PolicrMiniBot.RespSyncCmdPlug
+  alias PolicrMiniWeb.TgAssetsFetcher
 
   import PolicrMiniWeb.Helper
+  import PolicrMiniBot.Helper
 
   action_fallback PolicrMiniWeb.API.FallbackController
+
+  defdelegate synchronize_chat(chat_id), to: PolicrMiniBot.RespSyncChain
 
   def index(%{assigns: %{user: user}} = conn, _prams) do
     chats = Instances.find_user_chats(user.id)
@@ -28,7 +27,7 @@ defmodule PolicrMiniWeb.Admin.API.ChatController do
   def photo(conn, %{"id" => id}) do
     with {:ok, _} <- check_permissions(conn, id),
          {:ok, chat} <- Chat.get(id) do
-      Phoenix.Controller.redirect(conn, to: get_photo_assets(chat.small_photo_id))
+      Phoenix.Controller.redirect(conn, to: TgAssetsFetcher.get_photo(chat.small_photo_id))
     end
   end
 
@@ -78,11 +77,19 @@ defmodule PolicrMiniWeb.Admin.API.ChatController do
   end
 
   # 检查自定义验证是否存在问答
-  defp check_vmethod(%{"chat_id" => chat_id, "verification_mode" => vmethod}) when vmethod == 1 do
+  defp check_vmethod(%{"chat_id" => chat_id, "verification_mode" => 1}) do
     if Chats.get_custom_kits_count(chat_id) > 0 do
       :ok
     else
       {:error, %{description: "请在自定义页面添加问答"}}
+    end
+  end
+
+  defp check_vmethod(%{"verification_mode" => 4}) do
+    if PolicrMini.opt_exists?("--allow-client-switch-grid") do
+      :ok
+    else
+      {:error, %{description: "您不能主动切换到网格验证，此功能被运营者禁用。"}}
     end
   end
 
@@ -105,23 +112,23 @@ defmodule PolicrMiniWeb.Admin.API.ChatController do
     case Telegex.get_chat_member(chat_id, PolicrMiniBot.id()) do
       {:ok, member} ->
         cond do
-          member.status != "administrator" ->
+          is_administrator?(member) == false ->
             {:error, %{description: "bot is not an administrator"}}
 
-          member.can_restrict_members == false ->
+          can_restrict_members?(member) == false ->
             {:error, %{description: "bot does not have permission to restrict members"}}
 
-          member.can_delete_messages == false ->
+          can_delete_messages?(member) == false ->
             {:error, %{description: "bot does not have permission to delete messages"}}
 
-          member.can_send_messages == false ->
+          can_send_messages?(member) == false ->
             {:error, %{description: "bot does not have permission to send messages"}}
 
           true ->
             {:ok, []}
         end
 
-      {:error, %Telegex.Model.Error{description: description}} ->
+      {:error, %Telegex.Error{description: description}} ->
         {:error, %{description: description}}
 
       _ ->
@@ -227,7 +234,7 @@ defmodule PolicrMiniWeb.Admin.API.ChatController do
 
   def sync(conn, %{"id" => chat_id}) do
     with {:ok, _} <- check_sys_permissions(conn),
-         {:ok, chat} <- RespSyncCmdPlug.synchronize_chat(chat_id) do
+         {:ok, chat} <- synchronize_chat(chat_id) do
       render(conn, "sync.json", %{chat: chat})
     end
   end

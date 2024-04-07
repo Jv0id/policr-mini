@@ -5,7 +5,7 @@ defmodule PolicrMiniBot.Worker.ValidationTerminator do
 
   use PolicrMiniBot.Worker
 
-  alias PolicrMini.{Repo, Chats}
+  alias PolicrMini.{Repo, Chats, Stats}
   alias PolicrMini.Chats.{Scheme, Verification}
 
   import PolicrMiniBot.{Helper, VerificationHelper}
@@ -50,8 +50,9 @@ defmodule PolicrMiniBot.Worker.ValidationTerminator do
     v = Repo.reload(v)
     # 为等待状态才实施操作
     if v.status == :waiting do
-      # 自增统计数据（超时）
-      Chats.increment_statistic(v.chat_id, v.target_user_language_code, :timeout)
+      # 写入验证数据点（超时）
+      Stats.write(v)
+
       # 添加操作记录
       kmethod = scheme.timeout_killing_method || default!(:tkmethod)
       create_operation(v, kmethod, :system)
@@ -105,13 +106,8 @@ defmodule PolicrMiniBot.Worker.ValidationTerminator do
 
       # 添加操作记录
       create_operation(veri, kmeth, :admin)
-
-      # 添加统计（其它）
-      Chats.increment_statistic(
-        veri.chat_id,
-        veri.target_user_language_code,
-        :other
-      )
+      # 写入验证数据点（其它）
+      Stats.write(v)
 
       # 更新状态为超时
       Chats.update_verification(veri, %{status: status})
