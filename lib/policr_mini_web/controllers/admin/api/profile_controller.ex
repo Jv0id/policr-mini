@@ -7,15 +7,15 @@ defmodule PolicrMiniWeb.Admin.API.ProfileController do
 
   import PolicrMiniWeb.Helper
 
-  alias PolicrMini.DefaultsServer
-  alias PolicrMiniBot.{ImageProvider, UpdatesPoller}
+  alias PolicrMini.{DefaultsServer, ZipUtil}
+  alias PolicrMiniBot.ImageProvider
 
   require Logger
 
   action_fallback PolicrMiniWeb.API.FallbackController
 
   def index(conn, _params) do
-    # 此 API 调用无需系统权限
+    # 此 API 调用无需系统权限。
     scheme = DefaultsServer.get_scheme()
     manifest = ImageProvider.manifest()
     temp_manifest = ImageProvider.gen_manifest(ImageProvider.temp_albums_root())
@@ -47,25 +47,46 @@ defmodule PolicrMiniWeb.Admin.API.ProfileController do
   def upload_temp_albums(conn, %{"zip" => %{content_type: content_type} = zip} = _params)
       when content_type == "application/zip" do
     with {:ok, _} <- check_sys_permissions(conn),
-         {:ok, _} <- uploaded_check(zip.path) do
-      unzip_cwd = Path.dirname(zip.path)
+         {:ok, _} <- uploaded_check(zip.path),
+         {:ok, unziped_albums_dir} <- unzip_albulms(zip.path) do
+      temp_albums_dir = ImageProvider.temp_albums_root()
 
-      {:ok, _} = :zip.unzip(String.to_charlist(zip.path), cwd: String.to_charlist(unzip_cwd))
+      if File.exists?(temp_albums_dir) do
+        # 删除临时图集目录
+        Logger.debug("Removing temp albums directory: #{inspect(temp_albums_dir)}")
 
-      if File.exists?(ImageProvider.temp_albums_root()) do
-        File.rm_rf!(ImageProvider.temp_albums_root())
+        File.rm_rf!(temp_albums_dir)
       end
 
       try do
-        File.cp_r!(Path.join(unzip_cwd, "_albums"), ImageProvider.temp_albums_root())
+        # 复制解压后的图集到临时图集目录
+        File.cp_r!(unziped_albums_dir, temp_albums_dir)
 
         render(conn, "result.json", %{ok: true})
       rescue
         e ->
-          Logger.error("Processing uploaded resources failed: #{inspect(error: e)}")
+          Logger.error("Processing uploaded albums failed: #{inspect(exception: e)}")
 
           render(conn, "result.json", %{ok: false})
       end
+    end
+  end
+
+  defp unzip_albulms(zip_path) do
+    output_dir = Path.dirname(zip_path)
+
+    unziped_albums_dir = Path.join(output_dir, "_albums")
+
+    if File.exists?(unziped_albums_dir) do
+      # 先删除 cwd 目录中的旧解压图集，再进行解压。
+      Logger.debug("Removing old unziped albums directory: #{inspect(unziped_albums_dir)}")
+
+      File.rm_rf!(unziped_albums_dir)
+    end
+
+    case ZipUtil.unzip_file(zip_path, output_dir) do
+      {:ok, _} -> {:ok, unziped_albums_dir}
+      e -> e
     end
   end
 
@@ -89,18 +110,20 @@ defmodule PolicrMiniWeb.Admin.API.ProfileController do
   end
 
   def update_albums(conn, _parms) do
+    # 上传图集不仅会重启图片提供服务，还会在恰当的时机停止和启动更新处理器，以避免验证受到影响。
+    updates_handler = PolicrMiniBot.Supervisor.updates_handler()
+
     try do
       with {:ok, _} <- check_sys_permissions(conn) do
         if File.exists?(ImageProvider.temp_albums_root()) do
-          :ok = Supervisor.terminate_child(PolicrMiniBot.Supervisor, UpdatesPoller)
-
+          :ok = Supervisor.terminate_child(PolicrMiniBot.Supervisor, updates_handler)
           :ok = Supervisor.terminate_child(PolicrMiniBot.Supervisor, ImageProvider)
 
           File.rm_rf!(ImageProvider.albums_root())
           File.rename!(ImageProvider.temp_albums_root(), ImageProvider.albums_root())
 
           {:ok, _} = Supervisor.restart_child(PolicrMiniBot.Supervisor, ImageProvider)
-          {:ok, _} = Supervisor.restart_child(PolicrMiniBot.Supervisor, UpdatesPoller)
+          {:ok, _} = Supervisor.restart_child(PolicrMiniBot.Supervisor, updates_handler)
 
           render(conn, "result.json", %{ok: true})
         else
@@ -109,10 +132,10 @@ defmodule PolicrMiniWeb.Admin.API.ProfileController do
       end
     rescue
       e ->
-        Logger.error("Deployment of image set failed: #{inspect(error: e)}")
+        Logger.error("Deployment of albums failed: #{inspect(error: e)}")
 
         Supervisor.restart_child(PolicrMiniBot.Supervisor, ImageProvider)
-        Supervisor.restart_child(PolicrMiniBot.Supervisor, UpdatesPoller)
+        Supervisor.restart_child(PolicrMiniBot.Supervisor, updates_handler)
 
         render(conn, "result.json", %{ok: false})
     end

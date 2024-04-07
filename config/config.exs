@@ -8,7 +8,8 @@
 import Config
 
 config :policr_mini,
-  ecto_repos: [PolicrMini.Repo]
+  ecto_repos: [PolicrMini.Repo],
+  opts: []
 
 # Configures the endpoint
 config :policr_mini, PolicrMiniWeb.Endpoint,
@@ -18,11 +19,27 @@ config :policr_mini, PolicrMiniWeb.Endpoint,
   pubsub_server: PolicrMini.PubSub,
   live_view: [signing_salt: "hy+GpqGC"]
 
-# 配置图片服务
+# 配置图片服务。
 config :policr_mini, PolicrMiniBot.ImageProvider, root: "_assets"
 
-# 配置机器人
-config :policr_mini, PolicrMiniBot, auto_gen_commands: false, opts: []
+# 配置网格验证。
+config :policr_mini, PolicrMiniBot.GridCAPTCHA,
+  # 个体图片宽度
+  indi_width: 180,
+  # 个体图片高度
+  indi_height: 120,
+  # 水印字体
+  watermark_font_family: "Lato"
+
+# 配置机器人。
+config :policr_mini, PolicrMiniBot,
+  auto_gen_commands: false,
+  mosaic_method: :spoiler
+
+# 配置 Telegex 的适配器。
+config :telegex,
+  caller_adapter: {Finch, [receive_timeout: 5 * 1000]},
+  hook_adapter: Cowboy
 
 # 配置根链接。
 config :policr_mini, PolicrMiniWeb, root_url: "http://0.0.0.0:4000/"
@@ -33,7 +50,7 @@ config :policr_mini, PolicrMiniBot.Scheduler,
     # 修正过期验证，每 5 分钟。
     expired_check: [
       schedule: "*/5 * * * *",
-      task: {PolicrMiniBot.Runner.ExpiredChecker, :run, []}
+      task: {PolicrMiniBot.Runner.ExpiredFixer, :run, []}
     ],
     # 工作状态检查，每 4 小时。
     working_check: [
@@ -47,10 +64,8 @@ config :policr_mini, PolicrMiniBot.Scheduler,
     ]
   ]
 
-# 配置 Telegex
-config :telegex,
-  timeout: 1000 * 30,
-  recv_timeout: 1000 * 45
+# 配置默认语言
+config :policr_mini, PolicrMiniWeb.Gettext, default_locale: "zh"
 
 # Configures Elixir's Logger
 config :logger, :console,

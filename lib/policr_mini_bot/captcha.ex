@@ -4,13 +4,14 @@ defmodule PolicrMiniBot.Captcha do
   """
 
   alias PolicrMini.Chats.Scheme
-  alias Telegex.Model.{InlineKeyboardButton, InlineKeyboardMarkup}
+  alias Telegex.Type.{InlineKeyboardButton, InlineKeyboardMarkup}
 
   alias PolicrMiniBot.{
-    ImageCaptcha,
+    ImageCAPTCHA,
     CustomCaptcha,
     ArithmeticCaptcha,
-    FallbackCaptcha
+    FallbackCaptcha,
+    GridCAPTCHA
   }
 
   require Logger
@@ -55,7 +56,7 @@ defmodule PolicrMiniBot.Captcha do
 
   @spec build_markup([[Data.candidate()]], integer()) :: InlineKeyboardMarkup.t()
   @doc """
-  从候选数据列表中构建 `Telegex.Model.InlineKeyboardMarkup`
+  从候选数据列表中构建 `Telegex.Type.InlineKeyboardMarkup`
   注意，参数 `candidates` 是一个二维数组。参数 `verification_id` 则需要一个已被记录的验证编号。
   此函数的 `candidates` 参数仅作为显示按钮的文本数据，因为回调数组由按钮所在的索引位置自动生成。
   """
@@ -95,9 +96,10 @@ defmodule PolicrMiniBot.Captcha do
   end
 
   @captcha_mapping [
-    image: ImageCaptcha,
+    image: ImageCAPTCHA,
     custom: CustomCaptcha,
     arithmetic: ArithmeticCaptcha,
+    grid: GridCAPTCHA,
     # 当前的备用验证就是主动验证
     initiative: FallbackCaptcha
   ]

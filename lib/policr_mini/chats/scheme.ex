@@ -6,7 +6,7 @@ defmodule PolicrMini.Chats.Scheme do
   use PolicrMini.Schema
 
   alias PolicrMini.EctoEnums.{
-    VerificationModeEnum,
+    VerificationMode,
     KillingMethodEnum,
     MentionText,
     ServiceMessage
@@ -28,7 +28,7 @@ defmodule PolicrMini.Chats.Scheme do
     # 群组 ID
     field :chat_id, :integer
     # 验证模式
-    field :verification_mode, VerificationModeEnum
+    field :verification_mode, VerificationMode
     # 验证时长
     field :seconds, :integer
     # 超时结果的击杀方法
@@ -73,7 +73,7 @@ defmodule PolicrMini.Chats.Scheme do
 
   def default_params do
     %{
-      verification_mode: :image,
+      verification_mode: :grid,
       seconds: 300,
       timeout_killing_method: :kick,
       wrong_killing_method: :kick,

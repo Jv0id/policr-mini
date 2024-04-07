@@ -46,7 +46,7 @@ const buildPageContentMissingConfirm = ({ title }) => (
       <a
         tw="text-blue-600"
         target="_blank"
-        href="https://mini.telestd.me/community"
+        href="https://mini.gramlabs.org/community"
       >
         社群
       </a>
@@ -68,13 +68,21 @@ export default () => {
           </div>
           <div tw="ml-6 text-black">
             <p tw="text-xl font-bold tracking-wide">policrmini</p>
-            <p tw="text-xs font-bold tracking-wider">项目组：Telestd</p>
-            <p tw="text-xs font-bold tracking-wider">隶属于：POLICR</p>
+            <p tw="text-sm md:text-base font-bold tracking-wider">
+              项目组：
+              <a tw="text-black" target="_blank" href="https://blog.gramlabs.org/">
+                GramLabs
+              </a>
+            </p>
+            <p tw="text-xs md:text-sm text-gray-800 tracking-wider leading-relaxed">
+              GramLabs 意为“Telegram 实验室”，旨在探索更多免费的 Telegram
+              基础应用。
+            </p>
           </div>
         </div>
         <div tw="w-full lg:w-5/12 flex justify-center lg:justify-end">
           <div tw="mr-8 lg:mr-16">
-            <IconLink href="https://mini.telestd.me/community" tw="mr-2">
+            <IconLink href="https://mini.gramlabs.org/community" tw="mr-2">
               <i
                 style={{ fontSize: 24 }}
                 className="iconfont icon-telegram"
@@ -87,7 +95,7 @@ export default () => {
           <div>
             <div tw="flex">
               <div tw="flex flex-col mr-16">
-                <NavLink href="https://mini.telestd.me/community">
+                <NavLink href="https://mini.gramlabs.org/community">
                   社区群组
                 </NavLink>
                 <NavLink
@@ -106,19 +114,11 @@ export default () => {
                 <RouteNavLink to="/terms">服务条款</RouteNavLink>
               </div>
               <div tw="flex flex-col">
-                <NavLink href="https://t.me/policr_changelog">更新频道</NavLink>
-                <NavLink
-                  onClick={() => {
-                    dispatch(
-                      openModal({
-                        content: buildPageContentMissingConfirm({
-                          title: "编辑百科",
-                        }),
-                      })
-                    );
-                  }}
-                >
-                  编辑百科
+                <NavLink href="https://t.me/policr_changelog">
+                  更新频道
+                </NavLink>
+                <NavLink target="_blank" href="https://blog.gramlabs.org/">
+                  博客动态
                 </NavLink>
                 <NavLink
                   onClick={() => {

@@ -1,11 +1,12 @@
 defmodule PolicrMiniBot.VerificationHelper do
   @moduledoc false
 
-  alias PolicrMini.{Repo, Counter, Chats}
+  alias PolicrMini.{Repo, Counter, Chats, Instances}
+  alias PolicrMini.Instances.Chat
   alias PolicrMini.Chats.{Verification, Scheme}
   alias PolicrMiniBot.{Worker, EntryMaintainer, Captcha, JoinReuquestHosting}
-  alias Telegex.Model.User, as: TgUser
-  alias Telegex.Model.{InlineKeyboardMarkup, InlineKeyboardButton}
+  alias Telegex.Type.User, as: TgUser
+  alias Telegex.Type.{InlineKeyboardMarkup, InlineKeyboardButton}
 
   use PolicrMini.I18n
   use PolicrMiniBot.MessageCaller
@@ -14,8 +15,8 @@ defmodule PolicrMiniBot.VerificationHelper do
 
   require Logger
 
-  @type tgerr :: Telegex.Model.errors()
-  @type tgmsg :: Telegex.Model.Message.t()
+  @type tgerr :: Telegex.Type.error()
+  @type tgmsg :: Telegex.Type.Message.t()
   @type captcha_data :: Captcha.Data.t()
   @type send_opts :: MessageCaller.call_opts()
   @type source :: :joined | :join_request
@@ -24,6 +25,8 @@ defmodule PolicrMiniBot.VerificationHelper do
 
   @cant_initiate_conversation "Forbidden: bot can't initiate conversation with a user"
   @blocked_by_user "Forbidden: bot was blocked by the user"
+  @chat_restricted "Bad Request: CHAT_RESTRICTED"
+
   @admin_approve_prompt commands_text("请管理员自行鉴别后决定批准或拒绝此用户的加群请求。")
 
   # 过期时间：15 分钟
@@ -95,7 +98,7 @@ defmodule PolicrMiniBot.VerificationHelper do
       # 2. 尝试转换可能不匹配的数据来源
       # 3. 写入到入口消息
       # 4. 更新验证数据中的消息 ID
-      with {:ok, v} <- Chats.get_or_create_pending_verification(chat_id, user.id, params),
+      with {:ok, v} <- Chats.get_cr_pend_verif(chat_id, user.id, params),
            {:ok, v} <- try_convert_souce(:joined, v, scheme),
            {:ok, %{message_id: message_id}} <- put_entry_message(v, scheme, []),
            {:ok, v} = ok_r <- Chats.update_verification(v, %{message_id: message_id}) do
@@ -109,6 +112,10 @@ defmodule PolicrMiniBot.VerificationHelper do
 
         ok_r
       else
+        {:error, %{description: @chat_restricted, error_code: 400}} ->
+          # 群组被限制取消接管
+          Instances.cancel_chat_takeover(Chat.get!(chat_id))
+
         {:error, reason} = e ->
           Logger.error(
             "Embarrass joined user failed: #{inspect(reason: reason)}",
@@ -180,12 +187,12 @@ defmodule PolicrMiniBot.VerificationHelper do
       }
 
       # 主要流程：
-      # 1. 创建（或获取进行中的）验证数据
-      # 2. 尝试转换可能不匹配的数据来源
-      # 3. 写入到入口消息
-      # 4. 更新验证数据中的消息 ID
-      # 5. 发送验证
-      with {:ok, v} <- Chats.get_or_create_pending_verification(chat_id, user.id, params),
+      # 1. 创建（或获取进行中的）验证数据。
+      # 2. 尝试转换可能不匹配的数据来源。
+      # 3. 添加到入口消息。
+      # 4. 更新验证数据中的消息 ID。
+      # 5. 私聊发送验证消息。
+      with {:ok, v} <- Chats.get_cr_pend_verif(chat_id, user.id, params),
            {:ok, v} <- try_convert_souce(:join_request, v, scheme),
            {:ok, %{message_id: message_id}} <- put_entry_message(v, scheme, []),
            {:ok, v} <- Chats.update_verification(v, %{message_id: message_id}),
@@ -225,6 +232,12 @@ defmodule PolicrMiniBot.VerificationHelper do
           """
 
           send_text(chat_id, text, parse_mode: "MarkdownV2", logging: true)
+
+          e
+
+        {:error, :too_many_send_times} = e ->
+          # 验证发送次数过多
+          send_text(user.id, commands_text("同一个验证的发送次数过多，请使用旧消息完成验证。"), logging: true)
 
           e
 
@@ -297,6 +310,22 @@ defmodule PolicrMiniBot.VerificationHelper do
   # 目标来源和验证数据相匹配，直接返回验证数据
   def try_convert_souce(_, v, _scheme), do: {:ok, v}
 
+  @doc """
+  在发送验证之前检查验证的有效性。
+  """
+  @spec check_verification(Verification.t()) ::
+          {:ok, Verification.t()} | {:error, :too_many_send_times}
+  def check_verification(_v = %{send_times: st}) when st > 3 do
+    # 如果同一次验证被发送超过三次，则返回 `:too_many_send_times` 错误。
+    # TODO: 限制发送次数通过 scheme 自定义。
+
+    {:error, :too_many_send_times}
+  end
+
+  def check_verification(v) do
+    {:ok, v}
+  end
+
   @spec put_or_delete_entry_message(integer, Scheme.t()) :: :ok | {:error, any}
   def put_or_delete_entry_message(chat_id, scheme) do
     if v = Chats.find_last_pending_verification(chat_id) do
@@ -335,10 +364,11 @@ defmodule PolicrMiniBot.VerificationHelper do
       if pending_count == 1 do
         thello =
           commands_text("新成员 %{mention} 你好！",
-            mention: build_mention(new_chat_user, mention_scheme)
+            mention: scheme_mention(new_chat_user, mention_scheme)
           )
 
-        tdesc = commands_text("您当前需要完成验证才能解除限制，验证有效时间不超过 __%{seconds}__ 秒。", seconds: v.seconds)
+        tdesc = commands_text("您当前需要完成验证才能解除限制，验证有效时间不超过 %{count} 秒。", count: "__#{v.seconds}__")
+
         tfooter = commands_text("过期会被踢出或封禁，请尽快。")
 
         """
@@ -350,11 +380,11 @@ defmodule PolicrMiniBot.VerificationHelper do
       else
         thello =
           commands_text("最近加入的 %{mention} 和另外 %{remaining_count} 个还未验证的新成员，你们好！",
-            mention: build_mention(new_chat_user, mention_scheme),
+            mention: scheme_mention(new_chat_user, mention_scheme),
             remaining_count: pending_count - 1
           )
 
-        tdesc = commands_text("请主动完成验证以解除限制，验证有效时间不超过 __%{seconds}__ 秒。", seconds: v.seconds)
+        tdesc = commands_text("请主动完成验证以解除限制，验证有效时间不超过 %{count} 秒。", count: "__#{v.seconds}__")
         tfooter = commands_text("过期会被踢出或封禁，请尽快。")
 
         """
@@ -367,9 +397,9 @@ defmodule PolicrMiniBot.VerificationHelper do
 
     caller =
       if message_id = Keyword.get(opts, :message_id) do
-        make_text_editor(text, message_id)
+        text_editor(text, message_id)
       else
-        make_text_sender(text)
+        text_sender(text)
       end
 
     markup = %InlineKeyboardMarkup{
@@ -384,8 +414,10 @@ defmodule PolicrMiniBot.VerificationHelper do
     }
 
     call_opts = [
+      # 此处的选项不可省略，因为没有默认值
       reply_markup: markup,
-      disable_web_page_preview: false,
+      disable_notification: true,
+      disable_web_page_preview: true,
       parse_mode: "MarkdownV2"
     ]
 
@@ -410,11 +442,11 @@ defmodule PolicrMiniBot.VerificationHelper do
       if pending_count == 1 do
         theader =
           commands_text("用户 %{mention} 正在验证！",
-            mention: build_mention(new_chat_user, mention_scheme)
+            mention: scheme_mention(new_chat_user, mention_scheme)
           )
 
         tdesc = commands_text("加群请求会根据验证结果自动处理，并按照方案决定是否进一步封禁。")
-        tfooter = commands_text("验证有效时间不超过 __%{seconds}__ 秒。", seconds: v.seconds)
+        tfooter = commands_text("验证有效时间不超过 %{count} 秒。", count: "__#{v.seconds}__")
 
         """
         #{theader}
@@ -425,12 +457,12 @@ defmodule PolicrMiniBot.VerificationHelper do
       else
         theader =
           commands_text("最近申请加入的 %{mention} 和另外 %{remaining_count} 个用户正在验证！",
-            mention: build_mention(new_chat_user, mention_scheme),
+            mention: scheme_mention(new_chat_user, mention_scheme),
             remaining_count: pending_count - 1
           )
 
         tdesc = commands_text("加群请求会根据验证结果自动处理，并按照方案决定是否进一步封禁。")
-        tfooter = commands_text("验证有效时间不超过 __%{seconds}__ 秒。", seconds: v.seconds)
+        tfooter = commands_text("验证有效时间不超过 %{count} 秒。", count: "__#{v.seconds}__")
 
         """
         #{theader}
@@ -442,13 +474,15 @@ defmodule PolicrMiniBot.VerificationHelper do
 
     caller =
       if message_id = Keyword.get(opts, :message_id) do
-        make_text_editor(text, message_id)
+        text_editor(text, message_id)
       else
-        make_text_sender(text)
+        text_sender(text)
       end
 
     call_opts = [
-      disable_web_page_preview: false,
+      # 此处的选项不可省略，因为没有默认值
+      disable_notification: true,
+      disable_web_page_preview: true,
       parse_mode: "MarkdownV2"
     ]
 
@@ -460,9 +494,10 @@ defmodule PolicrMiniBot.VerificationHelper do
   发送并更新验证。
 
   如果验证发送成功，验证记录将被更新（包含正确答案），并返回更新后的验证记录。
+
+  注意：每发送成功一次，验证记录的 `send_times` 会自增 1。如果发送次数超过 3 会拒绝发送，并返回 `too_many_send_times` 错误原因。
   """
-  @spec send_verification(Verification.t(), Scheme.t()) ::
-          {:ok, Verification.t()} | {:error, any}
+  @spec send_verification(Verification.t(), Scheme.t()) :: {:ok, Verification.t()} | {:error, any}
   def send_verification(v, scheme) do
     mode = scheme.verification_mode || default!(:vmode)
     data = Captcha.make(mode, v.chat_id, scheme)
@@ -472,7 +507,7 @@ defmodule PolicrMiniBot.VerificationHelper do
         chat_title: "*#{escape_markdown(v.chat.title)}*"
       )
 
-    tfooter = commands_text("您还剩 %{sec} 秒，通过可解除限制。", sec: "__#{time_left_text(v)}__")
+    tfooter = commands_text("您还剩 %{count} 秒，通过可解除限制。", count: "__#{time_left_text(v)}__")
 
     text = """
     #{ttitle}
@@ -492,8 +527,12 @@ defmodule PolicrMiniBot.VerificationHelper do
       logging: true
     ]
 
-    with {:ok, _} <- send_verification_message(v, data, text, send_opts),
-         {:ok, v} <- Chats.update_verification(v, %{indices: data.correct_indices}) do
+    updated_params = %{indices: data.correct_indices, send_times: v.send_times + 1}
+
+    # 不能接收 `check_verification/1` 的返回值，因为此处并非一个实际值，会影响后续的更新。
+    with {:ok, _} <- check_verification(Map.merge(v, updated_params)),
+         {:ok, _} <- send_verification_message(v, data, text, send_opts),
+         {:ok, v} <- Chats.update_verification(v, updated_params) do
       {:ok, v}
     else
       e -> e
@@ -531,7 +570,14 @@ defmodule PolicrMiniBot.VerificationHelper do
   """
   @spec time_left_text(Verification.t()) :: integer()
   def time_left_text(%Verification{seconds: seconds, inserted_at: inserted_at}) do
-    seconds - DateTime.diff(DateTime.utc_now(), inserted_at)
+    left_secs = seconds - DateTime.diff(DateTime.utc_now(), inserted_at)
+
+    if left_secs < 0 do
+      # 如果剩余秒数小于 0 则返回 0（通常是机器人停止后超时处理取消产生的现象）
+      0
+    else
+      left_secs
+    end
   end
 
   @doc """
@@ -681,9 +727,9 @@ defmodule PolicrMiniBot.VerificationHelper do
   end
 
   @spec kick_chat_member(integer, integer, integer) ::
-          {:ok, boolean} | Telegex.Model.errors()
+          {:ok, boolean} | Telegex.Type.error()
   defp kick_chat_member(chat_id, user_id, delay_unban_secs) do
-    case PolicrMiniBot.config(:unban_method) do
+    case PolicrMiniBot.config_get(:unban_method, :until_date) do
       :api_call ->
         r = Telegex.ban_chat_member(chat_id, user_id)
 

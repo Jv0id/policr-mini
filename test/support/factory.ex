@@ -53,17 +53,6 @@ defmodule PolicrMini.Factory do
     }
   end
 
-  def build(:message_snapshot) do
-    %PolicrMini.Schema.MessageSnapshot{
-      message_id: 1234,
-      from_user_id: 123_456_789,
-      from_user_name: "小新",
-      date: 1_591_654_677,
-      text: "请回答问题「1 + 1 = ?」。您有 20 秒的时间通过此验证，超时将从群组【Elixir 中文交流】中封禁。",
-      markup_body: "[3](101:1) [2](101:2)"
-    }
-  end
-
   def build(:verification) do
     %PolicrMini.Chats.Verification{
       target_user_id: 491_837_624,
@@ -85,26 +74,11 @@ defmodule PolicrMini.Factory do
     }
   end
 
-  def build(:statistic) do
-    utc_now_date = Date.utc_today()
-
-    begin_at = DateTime.new!(utc_now_date, ~T[00:00:00], "Etc/UTC")
-    end_at = DateTime.add(begin_at, 3600 * 24 - 1, :second)
-
-    %PolicrMini.Chats.Statistic{
-      verifications_count: 0,
-      languages_top: %{},
-      begin_at: begin_at,
-      end_at: end_at,
-      verification_status: :other
-    }
-  end
-
   def build(:third_party) do
     %PolicrMini.Instances.ThirdParty{
       name: "开发实例",
       bot_username: "policr_mini_dev_bot",
-      homepage: "https://mini-dev.telestd.me",
+      homepage: "https://mini-dev.gramlabs.org",
       running_days: 1,
       version: "0.0.1-rc.0",
       is_forked: false

@@ -3,6 +3,8 @@ import Config
 # Definition environment
 config :policr_mini, :environment, :dev
 
+config :policr_mini, opts: ["--allow-client-switch-grid"]
+
 # Configure your database
 config :policr_mini, PolicrMini.Repo,
   username: "postgres",
@@ -12,6 +14,14 @@ config :policr_mini, PolicrMini.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10,
   migration_timestamps: [type: :utc_datetime]
+
+# 配置 InfluxDB 连接
+config :policr_mini, PolicrMini.InfluxConn,
+  auth: [method: :token, token: "__token__"],
+  bucket: "policr_mini_dev",
+  org: "policr_mini",
+  host: "localhost",
+  version: :v2
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
@@ -29,6 +39,11 @@ config :policr_mini, PolicrMiniWeb.Endpoint,
       "run",
       "watch",
       cd: Path.expand("../assets", __DIR__)
+    ],
+    pnpm: [
+      "run",
+      "dev",
+      cd: Path.expand("../webapps", __DIR__)
     ]
   ]
 

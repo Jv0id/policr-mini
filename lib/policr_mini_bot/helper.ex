@@ -9,12 +9,21 @@ defmodule PolicrMiniBot.Helper do
     CheckRequiredPermissions
   }
 
-  alias Telegex.Model.ChatMember
+  alias Telegex.Type.{
+    ChatMember,
+    ChatMemberOwner,
+    ChatMemberAdministrator,
+    ChatMemberRestricted,
+    ChatMemberLeft,
+    ChatMemberBanned
+  }
+
+  use TypedStruct
 
   require Logger
 
-  @type tgerr :: {:error, Telegex.Model.errors()}
-  @type tgmsg :: Telegex.Model.Message.t()
+  @type tgerr :: {:error, Telegex.Type.error()}
+  @type tgmsg :: Telegex.Type.Message.t()
 
   @doc """
   获取机器人自身的 `id` 字段。详情参照 `PolicrMiniBot.id/0` 函数。
@@ -56,15 +65,17 @@ defmodule PolicrMiniBot.Helper do
     )
   end
 
-  @default_restrict_permissions %Telegex.Model.ChatPermissions{
+  @default_restrict_permissions %Telegex.Type.ChatPermissions{
     can_send_messages: false,
-    can_send_media_messages: false,
+    can_send_audios: false,
+    can_send_documents: false,
+    can_send_photos: false,
+    can_send_videos: false,
+    can_send_video_notes: false,
+    can_send_voice_notes: false,
     can_send_polls: false,
     can_send_other_messages: false,
-    can_add_web_page_previews: false,
-    can_change_info: false,
-    can_invite_users: false,
-    can_pin_messages: false
+    can_add_web_page_previews: false
   }
 
   @doc """
@@ -93,14 +104,16 @@ defmodule PolicrMiniBot.Helper do
   限制聊天成员。
 
   目前来讲，它会限制以下权限：
-  - `can_send_messages`: `false`
-  - `can_send_media_messages`: `false`
-  - `can_send_polls`: `false`
-  - `can_send_other_messages`: `false`
-  - `can_add_web_page_previews`: `false`
-  - `can_change_info`: `false`
-  - `can_invite_users`: `false`
-  - `can_pin_messages`: `false`
+    - `can_send_messages`: false,
+    - `can_send_audios`: false,
+    - `can_send_documents`: false,
+    - `can_send_photos`: false,
+    - `can_send_videos`: false,
+    - `can_send_video_notes`: false,
+    - `can_send_voice_notes`: false,
+    - `can_send_polls`: false,
+    - `can_send_other_messages`: false,
+    - `can_add_web_page_previews`: false
   """
   def restrict_chat_member(chat_id, user_id) do
     Telegex.restrict_chat_member(chat_id, user_id, @default_restrict_permissions)
@@ -112,15 +125,17 @@ defmodule PolicrMiniBot.Helper do
   此调用会解除成员所有限制。根据 https://github.com/Hentioe/policr-mini/issues/126 中的测试，开放所有权限是安全的。
   """
   def derestrict_chat_member(chat_id, user_id) do
-    Telegex.restrict_chat_member(chat_id, user_id, %Telegex.Model.ChatPermissions{
+    Telegex.restrict_chat_member(chat_id, user_id, %Telegex.Type.ChatPermissions{
       can_send_messages: true,
-      can_send_media_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
       can_send_polls: true,
       can_send_other_messages: true,
-      can_add_web_page_previews: true,
-      can_change_info: true,
-      can_invite_users: true,
-      can_pin_messages: true
+      can_add_web_page_previews: true
     })
   end
 
@@ -131,8 +146,6 @@ defmodule PolicrMiniBot.Helper do
   def typing(chat_id) do
     Telegex.send_chat_action(chat_id, "typing")
   end
-
-  @markdown_parse_mode "MarkdownV2"
 
   @type mention_opts :: [
           {:parse_mode, String.t()},
@@ -153,9 +166,11 @@ defmodule PolicrMiniBot.Helper do
   def mention(%{id: id} = user, options \\ []) do
     options =
       options
-      |> Keyword.put_new(:parse_mode, @markdown_parse_mode)
-      |> Keyword.put_new(:anonymization, true)
+      |> Keyword.put_new(:parse_mode, "MarkdownV2")
+      |> Keyword.put_new(:anonymization, false)
       |> Keyword.put_new(:mosaic, false)
+
+    parse_mode = options[:parse_mode]
 
     name =
       if options[:anonymization] do
@@ -164,16 +179,25 @@ defmodule PolicrMiniBot.Helper do
         name = fullname(user)
 
         if options[:mosaic] do
-          mosaic_name(name)
+          # 马赛克函数由于包含必要标签，会自行处理字符转义。
+          mosaic_name(name, parse_mode)
         else
-          name
+          safe_parse_mode(name, parse_mode)
         end
       end
 
-    case options[:parse_mode] do
-      "MarkdownV2" -> "[#{escape_markdown(name)}](tg://user?id=#{id})"
-      "HTML" -> ~s(<a href="tg://user?id=#{id}">#{Telegex.Tools.safe_html(name)}</a>)
+    case parse_mode do
+      "MarkdownV2" -> "[#{name}](tg://user?id=#{id})"
+      "HTML" -> ~s(<a href="tg://user?id=#{id}">#{name}</a>)
     end
+  end
+
+  def safe_parse_mode(text, "MarkdownV2") do
+    Telegex.Tools.safe_markdown(text)
+  end
+
+  def safe_parse_mode(text, "HTML") do
+    Telegex.Tools.safe_html(text)
   end
 
   @type fullname_user :: %{
@@ -195,68 +219,112 @@ defmodule PolicrMiniBot.Helper do
   请注意：此函数输出 `MarkdownV2` 格式，且不能定制。
 
   ## 例子
-      iex>PolicrMiniBot.Helper.build_mention(%{id: 101, first_name: "Michael", last_name: "Jackson"}, :full_name)
+      iex>PolicrMiniBot.Helper.scheme_mention(%{id: 101, first_name: "Michael", last_name: "Jackson"}, :full_name)
       "[Michael Jackson](tg://user?id=101)"
-      iex>PolicrMiniBot.Helper.build_mention(%{id: 101, first_name: "小红在上海鬼混", last_name: nil}, :mosaic_full_name)
-      "[小███混](tg://user?id=101)"
+      iex>PolicrMiniBot.Helper.scheme_mention(%{id: 101, first_name: "小红在上海鬼混", last_name: nil}, :mosaic_full_name)
+      "[小||红在上海鬼||混](tg://user?id=101)"
   """
-  @spec build_mention(mention_user, mention_scheme) :: String.t()
-  def build_mention(user, scheme) do
+  @spec scheme_mention(mention_user, mention_scheme) :: String.t()
+  def scheme_mention(user, scheme) do
     id = user[:id]
 
-    text =
+    display_text =
       case scheme do
         :user_id -> to_string(id)
-        :full_name -> fullname(user)
-        :mosaic_full_name -> user |> fullname() |> mosaic_name()
+        :full_name -> user |> fullname() |> Telegex.Tools.safe_markdown()
+        :mosaic_full_name -> user |> fullname() |> mosaic_name("MarkdownV2")
       end
 
-    "[#{escape_markdown(text)}](tg://user?id=#{id})"
+    "[#{display_text}](tg://user?id=#{id})"
+  end
+
+  typedstruct module: MosaicConfig do
+    field :len, non_neg_integer
+    field :parse_mode, String.t()
+    field :method, :spoiler | :classic
   end
 
   @doc """
-  给名字打马赛克。
-
-  将名字中的部分字符替换成 `░` 符号。如果名字过长（超过五个字符），则只保留前后两个字符，中间使用三个 `█` 填充。
+  构造马赛克名称。
 
   ## 例子
-      iex> PolicrMiniBot.Helper.mosaic_name("小明")
-      "小░"
-      iex> PolicrMiniBot.Helper.mosaic_name("Hello")
-      "H░░░o"
-      iex> PolicrMiniBot.Helper.mosaic_name("Hentioe")
-      "H███e"
+      iex> PolicrMiniBot.Helper.mosaic_name("小明", "MarkdownV2")
+      "小||明||"
+      iex> PolicrMiniBot.Helper.mosaic_name("Hello", "MarkdownV2")
+      "H||ell||o"
+      iex> PolicrMiniBot.Helper.mosaic_name("Hentioe", "MarkdownV2")
+      "H||entio||e"
 
   """
-  @spec mosaic_name(String.t()) :: String.t()
-  def mosaic_name(name), do: mosaic_name_by_len(name, String.length(name))
-
-  @spec mosaic_name_by_len(String.t(), integer) :: String.t()
-  defp mosaic_name_by_len(name, len) when is_integer(len) and len == 1 do
-    name
+  @spec mosaic_name(String.t(), String.t()) :: String.t()
+  def mosaic_name(name, parse_mode) do
+    _mosaic_name(name, %MosaicConfig{
+      len: String.length(name),
+      parse_mode: parse_mode,
+      method: PolicrMiniBot.config_get(:mosaic_method, :spoiler)
+    })
   end
 
-  defp mosaic_name_by_len(name, len) when is_integer(len) and len == 2 do
-    name
-    |> String.graphemes()
-    |> Enum.with_index()
-    |> Enum.map_join(fn {char, index} ->
-      if index == 1, do: "░", else: char
-    end)
+  @spec _mosaic_name(String.t(), MosaicConfig.t()) :: String.t()
+
+  # 只有一个字符的名称，不打马赛克。
+  defp _mosaic_name(name, %{len: 1} = config) do
+    case config.parse_mode do
+      "MarkdownV2" -> Telegex.Tools.safe_markdown(name)
+      "HTML" -> Telegex.Tools.safe_html(name)
+    end
   end
 
-  defp mosaic_name_by_len(name, len) when is_integer(len) and len >= 3 and len <= 5 do
-    last_index = len - 1
-
-    name
-    |> String.graphemes()
-    |> Enum.with_index()
-    |> Enum.map_join(fn {char, index} ->
-      if index == 0 || index == last_index, do: char, else: "░"
-    end)
+  # 两个字符的名称，遮挡第二个字符（经典）。
+  defp _mosaic_name(name, %{len: 2, method: :classic} = _config) do
+    String.slice(name, 0..0) <> "░"
   end
 
-  defp mosaic_name_by_len(name, _len), do: "#{String.at(name, 0)}███#{String.at(name, -1)}"
+  # 两个字符的名称，遮挡第二个字符（Spoiler）。
+  defp _mosaic_name(name, %{len: 2, method: :spoiler, parse_mode: parse_mode}) do
+    safe_parse_mode(String.slice(name, 0..0), parse_mode) <>
+      wrap_spoiler(String.slice(name, 1..1), parse_mode)
+  end
+
+  # 3-5 个字符，遮挡除首尾外的中间字符（经典）。
+  defp _mosaic_name(name, %{len: len, method: :classic}) when len >= 3 and len <= 5 do
+    String.slice(name, 0..0) <> String.duplicate("░", len - 2) <> String.slice(name, -1..-1//1)
+  end
+
+  # 3-5 个字符，遮挡除首尾外的中间字符（Spoiler）。
+  defp _mosaic_name(name, %{len: len, method: :spoiler, parse_mode: parse_mode})
+       when len >= 3 and len <= 5 do
+    last = len - 1
+
+    safe_parse_mode(String.slice(name, 0..0), parse_mode) <>
+      wrap_spoiler(String.slice(name, 1..(last - 1)), parse_mode) <>
+      safe_parse_mode(String.slice(name, last..last), parse_mode)
+  end
+
+  defp _mosaic_name(name, %{method: :classic}) do
+    "#{String.slice(name, 0..0)}███#{String.slice(name, -1..-1//1)}"
+  end
+
+  defp _mosaic_name(name, %{len: len, method: :spoiler, parse_mode: parse_mode}) do
+    last = len - 1
+
+    safe_parse_mode(String.slice(name, 0..0), parse_mode) <>
+      wrap_spoiler(String.slice(name, 1..(last - 1)), parse_mode) <>
+      safe_parse_mode(String.slice(name, last..last), parse_mode)
+  end
+
+  @doc """
+  根据 `parse_mode` 包装 Spoiler 标签。
+  """
+  @spec wrap_spoiler(String.t(), String.t()) :: String.t()
+
+  def wrap_spoiler(text, "MarkdownV2") do
+    "||#{Telegex.Tools.safe_markdown(text)}||"
+  end
+
+  def wrap_spoiler(text, "HTML") do
+    "<tg-spoiler>#{Telegex.Tools.safe_html(text)}</tg-spoiler>"
+  end
 
   @defaults_key_mapping [
     vmode: :verification_mode,
@@ -293,7 +361,7 @@ defmodule PolicrMiniBot.Helper do
 
   ## 例子
       iex> PolicrMiniBot.Helper.default!(:vmode)
-      :image
+      :grid
       iex> PolicrMiniBot.Helper.default!(:vseconds)
       300
       iex> PolicrMiniBot.Helper.default!(:tkmethod)
@@ -334,7 +402,7 @@ defmodule PolicrMiniBot.Helper do
   @doc """
   响应回调查询。
   """
-  @spec answer_callback_query(String.t(), keyword()) :: :ok | {:error, Telegex.Model.errors()}
+  @spec answer_callback_query(String.t(), keyword()) :: :ok | {:error, Telegex.Type.error()}
   def answer_callback_query(callback_query_id, options \\ []) do
     Telegex.answer_callback_query(callback_query_id, options)
   end
@@ -358,4 +426,103 @@ defmodule PolicrMiniBot.Helper do
           | :ok
 
   defdelegate check_takeover_permissions(member), to: CheckRequiredPermissions
+
+  # TODO: 为下列检查 `ChatMember` 的系列函数添加测试。
+  @doc """
+  检查 `ChatMember` 是否具有发言权限。
+  """
+  @spec can_send_messages?(ChatMember.t()) :: boolean
+
+  # 权限受限，检查 `can_send_messages` 字段。
+  def can_send_messages?(chat_member) when is_struct(chat_member, ChatMemberRestricted) do
+    chat_member.can_send_messages
+  end
+
+  # 已离开或被封禁，直接返回 `false`。
+  def can_send_messages?(chat_member)
+      when is_struct(chat_member, ChatMemberLeft) or is_struct(chat_member, ChatMemberBanned) do
+    false
+  end
+
+  # 其余情况，一律返回 `true`。
+  def can_send_messages?(_chat_member) do
+    true
+  end
+
+  @doc """
+  检查 `ChatMember` 是否是管理员（包括所有者）。
+  """
+  @spec is_administrator?(Telegex.Type.ChatMember.t()) :: boolean
+
+  # 是管理员或所有者，直接返回 `true`。
+  def is_administrator?(chat_member)
+      when is_struct(chat_member, ChatMemberAdministrator) or
+             is_struct(chat_member, ChatMemberOwner) do
+    true
+  end
+
+  # 其余情况，一律返回 `false`。
+  def is_administrator?(_chat_member) do
+    false
+  end
+
+  @doc """
+  检查 `ChatMember` 是否能够删除消息。
+  """
+  @spec can_delete_messages?(Telegex.Type.ChatMember.t()) :: boolean
+
+  # 是管理员，检查 `can_delete_messages` 字段。
+  def can_delete_messages?(chat_member) when is_struct(chat_member, ChatMemberAdministrator) do
+    chat_member.can_delete_messages
+  end
+
+  # 是所有者，直接返回 `true`。
+  def can_delete_messages?(chat_member) when is_struct(chat_member, ChatMemberOwner) do
+    true
+  end
+
+  # 其余情况，一律返回 `false`。
+  def can_delete_messages?(_chat_member) do
+    false
+  end
+
+  @doc """
+  检查 `ChatMember` 是否能够限制成员权限。
+  """
+  @spec can_restrict_members?(Telegex.Type.ChatMember.t()) :: boolean
+
+  # 是管理员，检查 `can_restrict_members` 字段。
+  def can_restrict_members?(chat_member) when is_struct(chat_member, ChatMemberAdministrator) do
+    chat_member.can_restrict_members
+  end
+
+  # 是所有者，直接返回 `true`。
+  def can_restrict_members?(chat_member) when is_struct(chat_member, ChatMemberOwner) do
+    true
+  end
+
+  # 其余情况，一律返回 `false`。
+  def can_restrict_members?(_chat_member) do
+    false
+  end
+
+  @doc """
+  检查 `ChatMember` 是否能够提升成员。
+  """
+  @spec can_promote_members?(Telegex.Type.ChatMember.t()) :: boolean
+
+  # 是管理员，检查 `can_promote_members` 字段。
+  def can_promote_members?(chat_member) when is_struct(chat_member, ChatMemberAdministrator) do
+    chat_member.can_promote_members
+  end
+
+  # 是所有者，直接返回 `true`。
+  def can_promote_members?(chat_member) when is_struct(chat_member, ChatMemberOwner) do
+    true
+  end
+
+  # 其余情况，一律返回 `false`。
+  def can_promote_members?(_chat_member) do
+    false
+  end
 end

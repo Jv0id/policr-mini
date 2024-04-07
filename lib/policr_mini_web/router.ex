@@ -14,13 +14,23 @@ defmodule PolicrMiniWeb.Router do
   end
 
   pipeline :admin do
-    plug PolicrMiniWeb.TokenAuthentication, from: :page
+    plug PolicrMiniWeb.TokenAuthentication, from: :admin
     plug :put_layout, {PolicrMiniWeb.LayoutView, :admin}
+  end
+
+  pipeline :console do
+    plug PolicrMiniWeb.TokenAuthentication, from: :console
+    plug :put_layout, {PolicrMiniWeb.LayoutView, :console}
+  end
+
+  pipeline :console_api do
+    plug :accepts, ["json"]
+    plug PolicrMiniWeb.TokenAuthentication, from: :console_api
   end
 
   pipeline :admin_api do
     plug :accepts, ["json"]
-    plug PolicrMiniWeb.TokenAuthentication, from: :api
+    plug PolicrMiniWeb.TokenAuthentication, from: :admin_api
   end
 
   scope "/api", PolicrMiniWeb.API do
@@ -31,6 +41,12 @@ defmodule PolicrMiniWeb.Router do
     get "/terms", TermController, :index
     get "/sponsorship_histories", SponsorshipHistoryController, :index
     post "/sponsorship_histories", SponsorshipHistoryController, :add
+  end
+
+  scope "/console/api", PolicrMiniWeb.Console.API do
+    pipe_through [:console_api]
+
+    get "/:chat_id/stats", StatsController, :query
   end
 
   scope "/admin/api", PolicrMiniWeb.Admin.API do
@@ -59,8 +75,6 @@ defmodule PolicrMiniWeb.Router do
     put "/permissions/:id/customized", PermissionController, :change_customized
     delete "/permissions/:id/withdraw", PermissionController, :withdraw
     put "/permissions/chats/:chat_id/sync", PermissionController, :sync
-
-    get "/statistics/find_recently", StatisticController, :find_recently
 
     put "/verifications/:id/kill", VerificationController, :kill
 
@@ -97,6 +111,14 @@ defmodule PolicrMiniWeb.Router do
   scope "/admin", PolicrMiniWeb.Admin do
     pipe_through [:browser, :admin]
 
+    get "/logout", PageController, :logout
+    get "/*path", PageController, :index
+  end
+
+  scope "/console", PolicrMiniWeb.Console do
+    pipe_through [:browser, :console]
+
+    get "/photo", PageController, :photo
     get "/logout", PageController, :logout
     get "/*path", PageController, :index
   end
