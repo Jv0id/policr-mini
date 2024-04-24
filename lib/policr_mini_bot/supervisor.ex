@@ -3,15 +3,23 @@ defmodule PolicrMiniBot.Supervisor do
 
   use Supervisor
 
-  def start_link(_opts) do
-    Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
+  require Logger
+
+  def start_link(opts) do
+    if Keyword.get(opts, :serve, false) do
+      Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
+    else
+      Logger.warning("Bot is not serving")
+
+      :ignore
+    end
   end
 
   @impl true
   def init(_init_arg) do
     # 初始化 workers。
     PolicrMiniBot.Worker.MessageCleaner.init_queue()
-    PolicrMiniBot.Worker.ValidationTerminator.init_queue()
+    PolicrMiniBot.Worker.VerificationTerminator.init_queue()
 
     children = [
       # 任务缓存

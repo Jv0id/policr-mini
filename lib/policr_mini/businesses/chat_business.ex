@@ -63,11 +63,6 @@ defmodule PolicrMini.ChatBusiness do
     |> Enum.map(fn p -> p.user end)
   end
 
-  @spec find_takeovered :: [Chat.t()]
-  def find_takeovered do
-    from(c in Chat, where: c.is_take_over == true) |> Repo.all()
-  end
-
   @keywords_separator_re ~r/ +/
 
   # TODO: 添加测试。

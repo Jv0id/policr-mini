@@ -1,7 +1,7 @@
 defmodule PolicrMini.Stats do
   @moduledoc false
 
-  alias PolicrMini.{Chats, InfluxConn}
+  alias PolicrMini.{Chats, InfluxConn, Serveds}
   alias PolicrMini.Chats.Verification
 
   require Logger
@@ -94,7 +94,7 @@ defmodule PolicrMini.Stats do
         status: to_string(status),
         source: to_string(v.source)
       },
-      timestamp: DateTime.utc_now()
+      timestamp: v.updated_at
     }
 
     write(point)
@@ -143,12 +143,12 @@ defmodule PolicrMini.Stats do
   end
 
   @doc """
-  重新生成最近一周。
+  重新生成特定群组最近指定天数的统计数据。
   """
-  @spec regen_recent_week(integer) :: :ok
-  def regen_recent_week(chat_id) do
-    dtart = DateTime.utc_now()
-    dend = DateTime.add(dtart, -7, :day)
+  @spec regen_recent_days(integer, integer) :: :ok
+  def regen_recent_days(chat_id, days) do
+    dend = DateTime.utc_now()
+    dtart = DateTime.add(dend, -days, :day)
 
     regen(chat_id, dtart, dend)
   end
@@ -162,10 +162,10 @@ defmodule PolicrMini.Stats do
     delete_by_time_range(chat_id, dstart, dend)
     # 从此时间段的验证记录中重新生成时序数据
     # todo: 加上时区
-    verfs = Chats.time_range_verfs(chat_id, dstart, dend)
+    vs = Chats.time_range_verfs(chat_id, dstart, dend)
 
-    # todo: 批量写入时序数据
-    verfs
+    # todo: 批量写入
+    vs
     |> Stream.each(&write/1)
     |> Stream.run()
 
@@ -185,5 +185,24 @@ defmodule PolicrMini.Stats do
 
   def clear_all(chat_id) do
     delete_by_time_range(chat_id, ~U[1970-01-01T00:00:00.00Z], DateTime.utc_now())
+  end
+
+  @doc """
+  重置指定群组的统计数据（仅生成最近的数据）。
+  """
+  def reset_recently(chat_id) do
+    # 清空此群组的所有数据
+    :ok = clear_all(chat_id)
+    # 重新生成最近一个月的数据
+    regen_recent_days(chat_id, 30)
+  end
+
+  def reset_all_stats do
+    r =
+      for chat <- Serveds.find_takeovered_chats() do
+        reset_recently(chat.id)
+      end
+
+    %{count: length(r)}
   end
 end
